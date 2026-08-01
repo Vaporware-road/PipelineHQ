@@ -22,7 +22,7 @@ export default function AccountsPage() {
   return (
     <div>
       <PageHeader title="Accounts & contacts" subtitle="Company records created from lead conversion or manually." />
-      {error ? <p className="mb-3 text-sm text-[#b42318]">{error}</p> : null}
+      {error ? <p className="mb-3 text-sm text-[var(--danger)]">{error}</p> : null}
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="overflow-x-auto">
           <h2 className="font-[family-name:var(--font-display)] text-lg">Accounts</h2>

@@ -34,7 +34,7 @@ export default function JobsPage() {
           </Button>
         }
       />
-      {error ? <p className="mb-3 text-sm text-[#b42318]">{error}</p> : null}
+      {error ? <p className="mb-3 text-sm text-[var(--danger)]">{error}</p> : null}
       <Card className="overflow-x-auto">
         <table>
           <thead>

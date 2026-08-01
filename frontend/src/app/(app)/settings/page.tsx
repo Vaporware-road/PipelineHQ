@@ -73,7 +73,7 @@ export default function SettingsPage() {
         title="Settings"
         subtitle="Manager controls for automation and portfolio demos."
       />
-      {error ? <p className="mb-3 text-sm text-[#b42318]">{error}</p> : null}
+      {error ? <p className="mb-3 text-sm text-[var(--danger)]">{error}</p> : null}
 
       <Card className="mb-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

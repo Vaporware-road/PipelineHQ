@@ -144,7 +144,7 @@ export default function PipelinePage() {
         title="Pipeline"
         subtitle="Open a deal for details, or change its stage with the dropdown."
       />
-      {error ? <p className="mb-3 text-sm text-[#b42318]">{error}</p> : null}
+      {error ? <p className="mb-3 text-sm text-[var(--danger)]">{error}</p> : null}
       {message ? <p className="mb-3 text-sm text-[var(--accent-ink)]">{message}</p> : null}
 
       <Card className="mb-4">
@@ -281,11 +281,11 @@ export default function PipelinePage() {
 
       {closeModal ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(11,6,20,0.78)] px-4 backdrop-blur-md"
           onClick={() => setCloseModal(null)}
         >
           <div
-            className="w-full max-w-md rounded-xl border border-[var(--line)] bg-[var(--surface)] p-5 shadow-xl"
+            className="w-full max-w-md rounded-xl border border-[var(--line)] bg-[var(--surface)] p-5 shadow-[0_0_0_1px_rgba(0,229,255,0.08),0_0_40px_rgba(255,43,214,0.2)]"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="font-[family-name:var(--font-display)] text-xl">
@@ -295,7 +295,7 @@ export default function PipelinePage() {
               Closing “{closeModal.opp.name}” requires a reason.
             </p>
             <textarea
-              className="mt-3 h-28 w-full rounded-md border border-[var(--line)] p-2 text-sm outline-none focus:border-[var(--accent)]"
+              className="mt-3 h-28 w-full rounded-md border border-[var(--line)] bg-[var(--input)] p-2 text-sm text-[var(--ink)] outline-none transition placeholder:text-[var(--muted)] focus:border-[var(--cyan)] focus:shadow-[0_0_0_1px_rgba(0,229,255,0.35)]"
               placeholder={closeModal.stage === "closed_won" ? "Win reason" : "Loss reason"}
               value={closeReason}
               onChange={(e) => setCloseReason(e.target.value)}

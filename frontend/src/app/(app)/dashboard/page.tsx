@@ -68,7 +68,7 @@ export default function DashboardPage() {
         }
         actions={<DateRangePicker value={range} onChange={setRange} />}
       />
-      {error ? <p className="mb-3 text-sm text-[#b42318]">{error}</p> : null}
+      {error ? <p className="mb-3 text-sm text-[var(--danger)]">{error}</p> : null}
 
       {!overview || !snap ? (
         <Empty>Loading metrics…</Empty>

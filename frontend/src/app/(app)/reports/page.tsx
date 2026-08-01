@@ -87,7 +87,7 @@ export default function ReportsPage() {
           </>
         }
       />
-      {error ? <p className="mb-3 text-sm text-[#b42318]">{error}</p> : null}
+      {error ? <p className="mb-3 text-sm text-[var(--danger)]">{error}</p> : null}
       {job ? (
         <Card className="mb-4">
           <p className="text-sm">

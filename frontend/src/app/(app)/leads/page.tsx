@@ -134,7 +134,7 @@ export default function LeadsPage() {
         title="Leads"
         subtitle="SDR workspace — create, qualify, convert. CSV import runs on Celery."
       />
-      {error ? <p className="mb-3 text-sm text-[#b42318]">{error}</p> : null}
+      {error ? <p className="mb-3 text-sm text-[var(--danger)]">{error}</p> : null}
 
       <Card className="mb-4">
         <div className="flex flex-wrap items-end justify-between gap-3">

@@ -108,37 +108,40 @@ export function GlobalSearch() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="hidden items-center gap-2 rounded-md border border-[var(--line)] px-2.5 py-1.5 text-sm text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--ink)] sm:inline-flex"
+        className="hidden items-center gap-2 rounded-md border border-[var(--line)] px-2.5 py-1.5 text-sm text-[var(--muted)] transition hover:border-[var(--cyan)] hover:text-[var(--cyan)] sm:inline-flex"
         aria-label="Search"
       >
         <span>Search</span>
-        <kbd className="rounded border border-[var(--line)] bg-[var(--bg)] px-1.5 py-0.5 font-mono text-[10px]">
+        <kbd className="rounded border border-[var(--line)] bg-[var(--input)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--cyan)]">
           ⌘K
         </kbd>
       </button>
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="rounded-md border border-[var(--line)] px-2 py-1 text-sm sm:hidden"
+        className="rounded-md border border-[var(--line)] px-2 py-1 text-sm text-[var(--muted)] transition hover:border-[var(--cyan)] hover:text-[var(--cyan)] sm:hidden"
         aria-label="Search"
       >
         Search
       </button>
 
       {open ? (
-        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 px-4 pt-[12vh]" onClick={close}>
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center bg-[rgba(11,6,20,0.78)] px-4 pt-[12vh] backdrop-blur-md"
+          onClick={close}
+        >
           <div
-            className="w-full max-w-lg overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--surface)] shadow-xl"
+            className="w-full max-w-lg overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--surface)] shadow-[0_0_0_1px_rgba(0,229,255,0.08),0_0_48px_rgba(255,43,214,0.22)]"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="border-b border-[var(--line)] px-3 py-2">
+            <div className="border-b border-[var(--line)] bg-[var(--input)] px-3 py-2">
               <input
                 ref={inputRef}
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 onKeyDown={onKeyDown}
                 placeholder="Search leads, accounts, contacts, deals…"
-                className="w-full bg-transparent py-2 text-sm outline-none placeholder:text-[var(--muted)]"
+                className="w-full bg-transparent py-2 text-sm text-[var(--ink)] outline-none placeholder:text-[var(--muted)]"
               />
             </div>
             <div className="max-h-80 overflow-y-auto p-2">
@@ -155,21 +158,23 @@ export function GlobalSearch() {
                   type="button"
                   onClick={() => go(hit)}
                   onMouseEnter={() => setActive(i)}
-                  className={`flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left ${
-                    i === active ? "bg-[var(--accent-soft)]" : "hover:bg-[var(--bg)]"
+                  className={`flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left transition ${
+                    i === active
+                      ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] shadow-[0_0_16px_rgba(255,43,214,0.15)] ring-1 ring-[rgba(255,43,214,0.28)]"
+                      : "hover:bg-[rgba(0,229,255,0.06)]"
                   }`}
                 >
-                  <span className="mt-0.5 rounded bg-[var(--bg)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--muted)]">
+                  <span className="mt-0.5 rounded border border-[var(--line)] bg-[var(--input)] px-1.5 py-0.5 text-[10px] uppercase tracking-[0.1em] text-[var(--cyan)]">
                     {TYPE_LABEL[hit.type] || hit.type}
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium">{hit.label}</span>
+                    <span className="block truncate text-sm font-medium text-[var(--ink)]">{hit.label}</span>
                     <span className="block truncate text-xs text-[var(--muted)]">{hit.subtitle}</span>
                   </span>
                 </button>
               ))}
             </div>
-            <div className="border-t border-[var(--line)] px-3 py-2 text-[10px] text-[var(--muted)]">
+            <div className="border-t border-[var(--line)] bg-[var(--input)] px-3 py-2 text-[10px] tracking-[0.08em] text-[var(--muted)]">
               ↑↓ navigate · Enter open · Esc close
             </div>
           </div>

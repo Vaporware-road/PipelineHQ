@@ -27,20 +27,20 @@ export function DateRangePicker({
           {p.label}
         </Button>
       ))}
-      <label className="text-xs text-[var(--muted)]">
+      <label className="text-[11px] font-medium uppercase tracking-[0.12em] text-[var(--muted)]">
         From
         <Input
           type="date"
-          className="mt-1 w-36"
+          className="datetime-field mt-1.5 w-40"
           value={value.from}
           onChange={(e) => onChange({ ...value, from: e.target.value, preset: "custom" })}
         />
       </label>
-      <label className="text-xs text-[var(--muted)]">
+      <label className="text-[11px] font-medium uppercase tracking-[0.12em] text-[var(--muted)]">
         To
         <Input
           type="date"
-          className="mt-1 w-36"
+          className="datetime-field mt-1.5 w-40"
           value={value.to}
           onChange={(e) => onChange({ ...value, to: e.target.value, preset: "custom" })}
         />

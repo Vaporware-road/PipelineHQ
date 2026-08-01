@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
+import { BrandMark, SiteFooter } from "@/components/Brand";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { NotificationBell } from "@/components/NotificationBell";
 import { useAuth } from "@/lib/auth";
@@ -34,8 +35,16 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   if (loading || !user) {
     return (
-      <div className="grid min-h-screen place-items-center bg-[var(--bg)] text-[var(--ink)]">
-        <p className="text-sm tracking-wide text-[var(--muted)]">Loading PipelineHQ…</p>
+      <div className="grid min-h-screen place-items-center text-[var(--ink)]">
+        <div className="text-center">
+          <p className="synth-neon font-[family-name:var(--font-display)] text-lg tracking-[0.12em]">
+            Pipeline<span className="text-[var(--accent)]">HQ</span>
+          </p>
+          <div className="mt-2 flex justify-center">
+            <BrandMark className="text-[10px]" />
+          </div>
+          <p className="mt-3 text-xs uppercase tracking-[0.28em] text-[var(--cyan)]">Loading…</p>
+        </div>
       </div>
     );
   }
@@ -43,27 +52,40 @@ export function AppShell({ children }: { children: ReactNode }) {
   const nav = NAV.filter((item) => !item.managerOnly || user.role === "MANAGER");
 
   return (
-    <div className="min-h-screen bg-[var(--bg)] text-[var(--ink)]">
-      <header className="sticky top-0 z-20 border-b border-[var(--line)] bg-[var(--surface)]/95 backdrop-blur">
+    <div className="flex min-h-screen flex-col text-[var(--ink)]">
+      <header className="shell-chrome sticky top-0 z-20">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
           <div className="flex items-center gap-3">
             <button
               type="button"
-              className="rounded-md border border-[var(--line)] px-2 py-1 text-sm md:hidden"
+              className="rounded-md border border-[var(--line)] bg-[var(--input)] px-2.5 py-1.5 text-xs uppercase tracking-[0.14em] text-[var(--muted)] transition hover:border-[var(--cyan)] hover:text-[var(--cyan)] md:hidden"
               onClick={() => setOpen((v) => !v)}
+              aria-expanded={open}
               aria-label="Toggle navigation"
             >
-              Menu
+              {open ? "Close" : "Menu"}
             </button>
-            <Link href="/dashboard" className="font-[family-name:var(--font-display)] text-xl tracking-tight">
-              Pipeline<span className="text-[var(--accent)]">HQ</span>
-            </Link>
+            <div className="flex flex-col leading-none">
+              <Link
+                href="/dashboard"
+                className="font-[family-name:var(--font-display)] text-xl tracking-[0.08em] transition hover:opacity-90"
+              >
+                Pipeline
+                <span className="text-[var(--accent)] drop-shadow-[0_0_10px_rgba(255,43,214,0.55)]">HQ</span>
+              </Link>
+              <BrandMark className="mt-1 text-[9px] sm:text-[10px]" />
+            </div>
           </div>
-          <div className="flex items-center gap-3 text-sm">
+
+          <div className="flex items-center gap-2.5 text-sm sm:gap-3">
             <GlobalSearch />
             <NotificationBell />
-            <span className="hidden sm:inline text-[var(--muted)]">
-              {user.first_name || user.username} · {user.role}
+            <span className="hidden items-center gap-1.5 border-l border-[var(--line)] pl-3 sm:inline-flex">
+              <span className="text-[var(--muted)]">{user.first_name || user.username}</span>
+              <span className="text-[var(--line)]">·</span>
+              <span className="rounded border border-[rgba(0,229,255,0.28)] bg-[rgba(0,229,255,0.08)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--cyan)]">
+                {user.role}
+              </span>
             </span>
             <button
               type="button"
@@ -71,14 +93,15 @@ export function AppShell({ children }: { children: ReactNode }) {
                 logout();
                 router.replace("/login");
               }}
-              className="rounded-md bg-[var(--ink)] px-3 py-1.5 text-[var(--bg)]"
+              className="rounded-md border border-[var(--cyan)] bg-transparent px-3 py-1.5 text-xs font-medium uppercase tracking-[0.1em] text-[var(--cyan)] transition hover:bg-[rgba(0,229,255,0.12)] hover:shadow-[var(--glow-cyan)]"
             >
               Log out
             </button>
           </div>
         </div>
+
         <nav
-          className={`${open ? "flex" : "hidden"} md:flex mx-auto max-w-7xl flex-col gap-1 px-4 pb-3 sm:px-6 md:flex-row md:flex-wrap md:gap-4 md:pb-3`}
+          className={`${open ? "flex" : "hidden"} md:flex mx-auto max-w-7xl flex-col gap-1 border-t border-[var(--line)] px-4 py-2.5 sm:px-6 md:flex-row md:flex-wrap md:items-center md:gap-1.5`}
         >
           {nav.map((item) => {
             const active = pathname.startsWith(item.href);
@@ -86,10 +109,10 @@ export function AppShell({ children }: { children: ReactNode }) {
               <Link
                 key={item.href}
                 href={item.href}
-                className={`rounded-md px-2 py-1.5 text-sm transition ${
+                className={`rounded-md px-2.5 py-1.5 text-sm tracking-wide transition ${
                   active
-                    ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]"
-                    : "text-[var(--muted)] hover:text-[var(--ink)]"
+                    ? "bg-[var(--accent-soft)] text-[var(--accent-ink)] shadow-[0_0_18px_rgba(255,43,214,0.22)] ring-1 ring-[rgba(255,43,214,0.35)]"
+                    : "text-[var(--muted)] hover:bg-[rgba(0,229,255,0.06)] hover:text-[var(--ink)]"
                 }`}
               >
                 {item.label}
@@ -97,8 +120,11 @@ export function AppShell({ children }: { children: ReactNode }) {
             );
           })}
         </nav>
+        <div className="shell-chrome-line" aria-hidden />
       </header>
-      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">{children}</main>
+
+      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6">{children}</main>
+      <SiteFooter />
     </div>
   );
 }

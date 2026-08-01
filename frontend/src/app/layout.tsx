@@ -1,21 +1,22 @@
 import type { Metadata } from "next";
-import { Fraunces, Manrope } from "next/font/google";
+import { Orbitron, Space_Grotesk } from "next/font/google";
 import { AuthProvider } from "@/lib/auth";
 import "./globals.css";
 
-const display = Fraunces({
+const display = Orbitron({
   subsets: ["latin"],
   variable: "--font-display",
 });
 
-const body = Manrope({
+const body = Space_Grotesk({
   subsets: ["latin"],
   variable: "--font-body",
 });
 
 export const metadata: Metadata = {
-  title: "PipelineHQ",
-  description: "B2B sales CRM for SaaS teams — capture leads, run deals, hit forecast.",
+  title: "PipelineHQ · Vaporware-Road",
+  description:
+    "Vaporware product by Vaporware-road — B2B sales CRM for SaaS teams.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

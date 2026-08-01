@@ -71,7 +71,7 @@ export default function TasksPage() {
           </div>
         }
       />
-      {error ? <p className="mb-3 text-sm text-[#b42318]">{error}</p> : null}
+      {error ? <p className="mb-3 text-sm text-[var(--danger)]">{error}</p> : null}
 
       <div className="space-y-3">
         {open.map((task) => (

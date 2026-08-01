@@ -2,6 +2,7 @@
 
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import { DateTimeFields } from "@/components/DateTimeFields";
 import { Badge, Button, Card, Empty, Input, Money, PageHeader, Select, Textarea } from "@/components/ui";
 import { api, apiList } from "@/lib/api";
 import type { CrmTask, DealComment, Opportunity } from "@/lib/types";
@@ -168,7 +169,7 @@ export default function OpportunityDetailPage() {
   }
 
   if (!opp && !error) return <Empty>Loading deal…</Empty>;
-  if (!opp) return <p className="text-sm text-[#b42318]">{error}</p>;
+  if (!opp) return <p className="text-sm text-[var(--danger)]">{error}</p>;
 
   const checklist = opp.meddic_checklist || {};
   const filled = Object.values(checklist).filter(Boolean).length;
@@ -181,7 +182,7 @@ export default function OpportunityDetailPage() {
         subtitle={`${opp.account_name} · owned by ${opp.owner.username}`}
         actions={opp.is_stale ? <Badge tone="warn">Stale deal</Badge> : undefined}
       />
-      {error ? <p className="mb-3 text-sm text-[#b42318]">{error}</p> : null}
+      {error ? <p className="mb-3 text-sm text-[var(--danger)]">{error}</p> : null}
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-1 space-y-3">
@@ -256,7 +257,7 @@ export default function OpportunityDetailPage() {
                   <label key={field.key} className="block">
                     <span className="mb-1 flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--muted)]">
                       {field.label}
-                      <span className={done ? "text-emerald-700" : "text-amber-700"}>{done ? "✓" : "○"}</span>
+                      <span className={done ? "text-[var(--cyan)]" : "text-[#ffc857]"}>{done ? "✓" : "○"}</span>
                     </span>
                     {field.key === "metrics" ||
                     field.key === "decision_criteria" ||
@@ -320,19 +321,25 @@ export default function OpportunityDetailPage() {
               })}
               {tasks.length === 0 ? <Empty>No tasks on this deal.</Empty> : null}
             </div>
-            <form className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto_auto]" onSubmit={addTask}>
-              <Input
-                placeholder="New task title"
-                value={taskForm.title}
-                onChange={(e) => setTaskForm({ ...taskForm, title: e.target.value })}
-                required
-              />
-              <Input
-                type="datetime-local"
+            <form
+              className="mt-4 flex flex-col gap-3 rounded-lg border border-[var(--line)] bg-[var(--input)]/60 p-3 sm:flex-row sm:items-end sm:gap-3"
+              onSubmit={addTask}
+            >
+              <label className="min-w-0 flex-1 text-[11px] font-medium uppercase tracking-[0.12em] text-[var(--muted)]">
+                Task
+                <Input
+                  className="mt-1.5"
+                  placeholder="New task title"
+                  value={taskForm.title}
+                  onChange={(e) => setTaskForm({ ...taskForm, title: e.target.value })}
+                  required
+                />
+              </label>
+              <DateTimeFields
                 value={taskForm.due_at}
-                onChange={(e) => setTaskForm({ ...taskForm, due_at: e.target.value })}
+                onChange={(due_at) => setTaskForm({ ...taskForm, due_at })}
               />
-              <Button type="submit" disabled={busy || !taskForm.title.trim()}>
+              <Button type="submit" disabled={busy || !taskForm.title.trim()} className="shrink-0 sm:mb-0.5">
                 Add task
               </Button>
             </form>
@@ -419,11 +426,11 @@ export default function OpportunityDetailPage() {
 
       {closeModal ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(11,6,20,0.78)] px-4 backdrop-blur-md"
           onClick={() => setCloseModal(null)}
         >
           <div
-            className="w-full max-w-md rounded-xl border border-[var(--line)] bg-[var(--surface)] p-5 shadow-xl"
+            className="w-full max-w-md rounded-xl border border-[var(--line)] bg-[var(--surface)] p-5 shadow-[0_0_0_1px_rgba(0,229,255,0.08),0_0_40px_rgba(255,43,214,0.2)]"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="font-[family-name:var(--font-display)] text-xl">

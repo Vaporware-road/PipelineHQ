@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { BrandMark, SiteFooter } from "@/components/Brand";
 import { Button, Card, Input } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import type { Role } from "@/lib/types";
@@ -38,60 +39,76 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-5xl flex-col justify-center gap-8 px-4 py-10 sm:px-6 lg:flex-row lg:items-center">
-      <div className="flex-1">
-        <p className="text-sm uppercase tracking-[0.2em] text-[var(--muted)]">Revenue workspace</p>
-        <h1 className="mt-2 font-[family-name:var(--font-display)] text-5xl leading-tight tracking-tight sm:text-6xl">
-          Pipeline<span className="text-[var(--accent)]">HQ</span>
-        </h1>
-        <p className="mt-4 max-w-md text-[var(--muted)]">
-          B2B sales CRM for SaaS teams — capture leads, run deals, hit forecast.
-        </p>
-      </div>
+    <div className="flex min-h-screen flex-col">
+      <div className="relative mx-auto flex w-full max-w-5xl flex-1 flex-col justify-center gap-12 px-4 py-12 sm:px-6 lg:flex-row lg:items-center lg:gap-20">
+        <div className="login-hero-brand flex-1">
+          <BrandMark className="text-xs sm:text-sm" />
+          <p className="mt-5 text-xs uppercase tracking-[0.32em] text-[var(--cyan)]">Revenue workspace</p>
+          <h1 className="synth-neon mt-4 font-[family-name:var(--font-display)] text-5xl leading-[1.05] tracking-[0.06em] sm:text-7xl">
+            Pipeline
+            <span className="text-[var(--accent)] drop-shadow-[0_0_18px_rgba(255,43,214,0.55)]">HQ</span>
+          </h1>
+          <p className="mt-6 max-w-md text-base leading-relaxed text-[var(--muted)] sm:text-lg">
+            Capture leads, run deals, hit forecast — neon-lit pipeline for SaaS teams.
+          </p>
+          <div className="login-hero-line mt-10" aria-hidden />
+        </div>
 
-      <div className="w-full max-w-md space-y-4">
-        <Card>
-          <h2 className="font-[family-name:var(--font-display)] text-xl">Demo access</h2>
-          <p className="mt-1 text-sm text-[var(--muted)]">Password for seeded users: demo1234</p>
-          <div className="mt-4 grid gap-2">
-            {DEMOS.map((d) => (
-              <button
-                key={d.role}
-                type="button"
-                disabled={busy}
-                onClick={() => run(() => demoLogin(d.role))}
-                className="rounded-lg border border-[var(--line)] px-3 py-3 text-left transition hover:border-[var(--accent)] hover:bg-[var(--accent-soft)]"
-              >
-                <div className="text-sm font-semibold">{d.label}</div>
-                <div className="text-xs text-[var(--muted)]">{d.blurb}</div>
-              </button>
-            ))}
-          </div>
-        </Card>
+        <div className="login-hero-panel w-full max-w-md space-y-4">
+          <Card>
+            <h2 className="font-[family-name:var(--font-display)] text-xl tracking-[0.06em]">Demo access</h2>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              Seeded password: <span className="text-[var(--cyan)]">demo1234</span>
+            </p>
+            <div className="mt-4 grid gap-2">
+              {DEMOS.map((d) => (
+                <button
+                  key={d.role}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => run(() => demoLogin(d.role))}
+                  className="group rounded-lg border border-[var(--line)] bg-[var(--input)] px-3 py-3 text-left transition hover:border-[var(--accent)] hover:bg-[var(--accent-soft)] hover:shadow-[0_0_20px_rgba(255,43,214,0.2)] disabled:opacity-50"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-semibold text-[var(--ink)] group-hover:text-[var(--accent-ink)]">
+                      {d.label}
+                    </span>
+                    <span className="rounded border border-[rgba(0,229,255,0.25)] px-1.5 py-0.5 text-[10px] uppercase tracking-[0.14em] text-[var(--cyan)]">
+                      {d.role}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-xs text-[var(--muted)]">{d.blurb}</div>
+                </button>
+              ))}
+            </div>
+          </Card>
 
-        <Card>
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">Password login</h2>
-          <form
-            className="mt-3 space-y-3"
-            onSubmit={(e) => {
-              e.preventDefault();
-              run(() => loginWithPassword(username, password));
-            }}
-          >
-            <Input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="username" />
-            <Input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="password"
-            />
-            {error ? <p className="text-sm text-[#b42318]">{error}</p> : null}
-            <Button type="submit" disabled={busy} className="w-full">
-              Sign in
-            </Button>
-          </form>
-        </Card>
+          <Card>
+            <h2 className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--cyan)]">Password login</h2>
+            <form
+              className="mt-3 space-y-3"
+              onSubmit={(e) => {
+                e.preventDefault();
+                run(() => loginWithPassword(username, password));
+              }}
+            >
+              <Input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="username" autoComplete="username" />
+              <Input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="password"
+                autoComplete="current-password"
+              />
+              {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
+              <Button type="submit" disabled={busy} className="w-full tracking-[0.08em] uppercase">
+                Sign in
+              </Button>
+            </form>
+          </Card>
+        </div>
       </div>
+      <SiteFooter />
     </div>
   );
 }

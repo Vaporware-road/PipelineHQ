@@ -48,7 +48,7 @@ export function NotificationBell() {
     <div className="relative">
       <button
         type="button"
-        className="relative rounded-md border border-[var(--line)] px-2.5 py-1.5 text-sm"
+        className="relative rounded-md border border-[var(--line)] px-2.5 py-1.5 text-sm text-[var(--muted)] transition hover:border-[var(--cyan)] hover:text-[var(--cyan)]"
         aria-label="Notifications"
         onClick={() => {
           setOpen((v) => !v);
@@ -57,20 +57,24 @@ export function NotificationBell() {
       >
         Alerts
         {count > 0 ? (
-          <span className="absolute -right-1.5 -top-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--accent)] px-1 text-[10px] font-semibold text-white">
+          <span className="absolute -right-1.5 -top-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--accent)] px-1 text-[10px] font-semibold text-white shadow-[0_0_12px_rgba(255,43,214,0.55)]">
             {count > 9 ? "9+" : count}
           </span>
         ) : null}
       </button>
       {open ? (
-        <div className="absolute right-0 z-30 mt-2 w-80 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-2 shadow-lg sm:w-96">
-          <div className="mb-2 flex items-center justify-between px-2 pt-1">
-            <p className="text-sm font-medium">Notifications</p>
-            <button type="button" className="text-xs text-[var(--accent)]" onClick={markAllRead}>
+        <div className="absolute right-0 z-30 mt-2 w-80 overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--surface)] shadow-[0_0_0_1px_rgba(0,229,255,0.08),0_0_36px_rgba(255,43,214,0.2)] sm:w-96">
+          <div className="mb-0 flex items-center justify-between border-b border-[var(--line)] bg-[var(--input)] px-3 py-2.5">
+            <p className="font-[family-name:var(--font-display)] text-sm tracking-[0.06em]">Notifications</p>
+            <button
+              type="button"
+              className="text-xs uppercase tracking-[0.1em] text-[var(--cyan)] transition hover:text-[var(--accent)]"
+              onClick={markAllRead}
+            >
               Mark all read
             </button>
           </div>
-          <div className="max-h-80 space-y-1 overflow-y-auto">
+          <div className="max-h-80 space-y-1 overflow-y-auto p-2">
             {items.length === 0 ? (
               <p className="px-2 py-6 text-center text-sm text-[var(--muted)]">No notifications yet.</p>
             ) : (
@@ -79,13 +83,15 @@ export function NotificationBell() {
                   key={n.id}
                   href={n.link || "/dashboard"}
                   onClick={() => setOpen(false)}
-                  className={`block rounded-lg px-2 py-2 text-sm hover:bg-[var(--accent-soft)] ${
-                    n.is_read ? "opacity-70" : ""
+                  className={`block rounded-lg px-2 py-2 text-sm transition hover:bg-[var(--accent-soft)] ${
+                    n.is_read ? "opacity-70" : "ring-1 ring-[rgba(255,43,214,0.15)]"
                   }`}
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <span className="font-medium">{n.title}</span>
-                    {!n.is_read ? <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-[var(--accent)]" /> : null}
+                    <span className="font-medium text-[var(--ink)]">{n.title}</span>
+                    {!n.is_read ? (
+                      <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-[var(--accent)] shadow-[0_0_8px_rgba(255,43,214,0.7)]" />
+                    ) : null}
                   </div>
                   {n.body ? <p className="mt-0.5 text-xs text-[var(--muted)]">{n.body}</p> : null}
                   <p className="mt-1 text-[10px] uppercase tracking-wide text-[var(--muted)]">
