@@ -1,67 +1,136 @@
 # PipelineHQ
 
-Classic **B2B SaaS sales CRM** (Salesforce-lite) built for a strong resume portfolio:
+**B2B sales CRM for SaaS teams** — capture leads, run deals, hit forecast.
 
-- **Django 5 + Django REST Framework** — domain models, RBAC, JWT auth
-- **Celery + Redis + Celery Beat** — async notifications, CSV import, forecast/analytics export, stale-deal scans, sequence advance, dashboard cache warm
-- **PostgreSQL** — relational CRM data
-- **Next.js 15 + TypeScript + Tailwind** — responsive UI for SDR / AE / Manager
+A multi-role Salesforce-lite workspace for SDR, AE, and Sales Manager. Built as a full-stack portfolio product: Django REST + Celery on Postgres/Redis, and a dark synthwave Next.js client.
 
-> Full learning walkthrough of every layer: [LEARNING.md](./LEARNING.md)
+[Learning guide](./LEARNING.md) · [About Vaporware-Road](./frontend/src/app/about/page.tsx)
 
 ---
 
-## Quick start (local — recommended on this machine)
+## Why this project
 
-Prerequisites: Python 3.12+, Node 20+, Postgres, Redis.
+Hiring managers recognize the classic CRM object model. PipelineHQ shows you can ship that model end-to-end — not only CRUD screens, but **process enforcement**, **async jobs**, **role-scoped analytics**, and a polished demo path.
+
+| Role | Job to be done |
+|------|----------------|
+| **SDR** | Own leads, qualify, convert → Account + Contact + Opportunity |
+| **AE** | Run pipeline, log activity, fill MEDDIC, close with win/loss reasons |
+| **Manager** | Forecast, route leads, advance sequences, export reports, reset demo |
+
+---
+
+## Stack
+
+| Layer | Choice |
+|-------|--------|
+| API | Django 5, Django REST Framework, SimpleJWT |
+| Jobs | Celery, Celery Beat, Redis broker |
+| Data | PostgreSQL |
+| Cache | Redis (dashboard + analytics) |
+| UI | Next.js 15, TypeScript, Tailwind |
+| Deploy story | Docker Compose (`db`, `redis`, `web`, `worker`, `beat`, `frontend`) |
+
+---
+
+## Features
+
+- **Lead → opportunity conversion** in one DB transaction  
+- **Pipeline board** with stage moves, filters, and win/loss close modal  
+- **MEDDIC stage gates** (API-enforced, not UI-only)  
+- **Deal comments** with `@username` mentions → in-app alerts  
+- **Tasks** (deal/lead/sequence-driven) + overdue notifications  
+- **Global search** (⌘K / Ctrl+K)  
+- **Lead routing** (round-robin SDRs)  
+- **Email sequences** (templates + enrollments + Beat advance)  
+- **Analytics & Reports** (date-ranged KPIs, funnel, activity, CSV export)  
+- **Manager Settings** — routing toggles + one-click demo reset  
+- **Synthwave UI** — neon chrome, expressive type, About branding page  
+
+---
+
+## Quick start (local)
+
+**Prerequisites:** Python 3.12+, Node 20+, PostgreSQL, Redis.
 
 ```bash
-# 1) Python deps (already created as .venv if you followed setup)
-source .venv/bin/activate
+# 1) Python
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+cp .env.example .env        # adjust DB/Redis if needed
 
-# 2) DB + seed
+# 2) Database + seed
 cd backend
 python manage.py migrate
 python manage.py seed_demo --reset
 python manage.py setup_periodic_tasks
 cd ..
 
-# 3) Terminal A — API
+# 3) API
 cd backend && python manage.py runserver 8000
 
-# 4) Terminal B — Celery worker (required for async jobs)
+# 4) Celery worker (required for imports, exports, sequences, reset)
 cd backend && celery -A config worker -l info
 
-# 5) Terminal C — Celery beat (periodic jobs)
+# 5) Celery beat (hourly stale scan, sequences, overdue tasks)
 cd backend && celery -A config beat -l info
 
-# 6) Terminal D — Frontend
+# 6) Frontend
 cd frontend && npm install && npm run dev
 ```
 
 Open **http://127.0.0.1:3000**
 
-### Demo logins
+### Docker Compose
 
-| Username | Role    | Password  |
-|----------|---------|-----------|
-| `sdr`    | SDR     | `demo1234` |
-| `ae`     | AE      | `demo1234` |
-| `ae2`    | AE      | `demo1234` |
-| `manager`| Manager | `demo1234` |
+```bash
+docker compose up --build
+```
 
-Or use the one-click **Demo access** buttons on the login page.
+Services: `db`, `redis`, `web`, `worker`, `beat`, `frontend`.
 
 ---
 
-## What to click for a great demo
+## Demo logins
 
-1. Login as **SDR** → create/convert a lead (creates Account + Contact + Opportunity). Check **Tasks** and the **Alerts** bell. Use filters on **Leads**.
-2. Login as **AE** → press **⌘K / Ctrl+K** to search → **Pipeline** → try **Proposal** without MEDDIC (blocked) → open deal → fill checklist + add a task → post `@manager` comment → close won/lost via the reason modal.
-3. Login as **Manager** → **Settings** (lead routing + reset demo) → **Sequences** (advance due steps) → **Reports** (date range + CSV export) → **Forecast** / stale scan → watch **Jobs** + **Alerts**.
+Password for all seeded users: `demo1234`
 
-Seeded data includes MEDDIC-filled deals, deal comments with mentions, open/overdue tasks, one outbound sequence enrollment, and sample notifications.
+| Username  | Role    |
+|-----------|---------|
+| `sdr`     | SDR     |
+| `ae`      | AE      |
+| `ae2`     | AE      |
+| `manager` | Manager |
+
+Or use the one-click **Demo access** buttons on the login page.
+
+### Suggested walkthrough
+
+1. **SDR** — create/convert a lead; check **Tasks** and the **Alerts** bell; use lead filters.  
+2. **AE** — ⌘K search → **Pipeline** → try Proposal without MEDDIC (blocked) → open deal → fill checklist → comment `@manager` → close with a reason.  
+3. **Manager** — **Settings** (routing / reset demo) → **Sequences** (advance due steps) → **Reports** + **Forecast** → watch **Jobs**.
+
+Seed includes MEDDIC-filled deals, comments with mentions, open/overdue tasks, one sequence enrollment, and sample notifications.
+
+---
+
+## Architecture
+
+```text
+Browser (Next.js)
+    │  JSON + JWT Bearer
+    ▼
+Django REST API ──► PostgreSQL
+    │
+    ├─► Redis cache   (dashboard / analytics)
+    │
+    └─► Redis broker ──► Celery worker
+                              ▲
+                         Celery Beat
+```
+
+HTTP stays fast; imports, exports, emails, sequence advances, stale scans, and demo reset run in Celery.
 
 ---
 
@@ -72,35 +141,45 @@ Seeded data includes MEDDIC-filled deals, deal comments with mentions, open/over
 | POST | `/api/auth/token/` | JWT username/password |
 | POST | `/api/auth/demo-login/` | `{ "role": "SDR\|AE\|MANAGER" }` |
 | GET | `/api/auth/me/` | Current user |
-| GET | `/api/auth/team/` | Active users for filter dropdowns |
-| GET | `/api/search/?q=` | Global search (Cmd/Ctrl+K in UI) |
-| CRUD | `/api/leads/` | + `POST .../convert/`, `POST .../import-csv/`, multi-status/date filters |
+| GET | `/api/auth/team/` | Users for filter dropdowns |
+| GET | `/api/search/?q=` | Global search |
+| CRUD | `/api/leads/` | Convert, CSV import, multi-filters |
 | CRUD | `/api/accounts/`, `/api/contacts/` | |
-| CRUD | `/api/opportunities/` | + `GET .../pipeline/`, `GET\|POST .../comments/`, amount/date filters |
-| CRUD | `/api/activities/`, `/api/tasks/` | Tasks: `?mine=1`, `?overdue=1` |
+| CRUD | `/api/opportunities/` | Pipeline, comments, amount/date filters |
+| CRUD | `/api/activities/`, `/api/tasks/` | `?mine=1`, `?overdue=1` |
 | GET | `/api/dashboard/` | Redis-cached KPIs |
 | GET/POST | `/api/analytics/<overview\|funnel\|activity\|export>/` | Date-ranged analytics |
-| GET/POST | `/api/forecast/` | POST = async CSV export (manager) |
-| GET | `/api/notifications/` | + `mark-read`, `unread-count` |
+| GET/POST | `/api/forecast/` | Manager CSV export |
+| GET | `/api/notifications/` | Inbox + mark-read |
 | GET/PATCH | `/api/routing-rules/` | Manager lead routing |
 | CRUD | `/api/sequences/`, `/api/sequence-enrollments/`, `/api/email-templates/` | |
 | GET | `/api/jobs/` | Celery job status |
-| POST | `/api/ops/stale-scan/` etc. | Manager ops incl. `reset-demo` |
+| POST | `/api/ops/<action>/` | stale-scan, warm-cache, reset-demo, … |
 
 ---
 
-## Docker Compose
+## Project layout
 
-If Docker is available:
-
-```bash
-docker compose up --build
+```text
+.
+├── backend/          # Django project (config + apps/accounts + apps/crm)
+├── frontend/         # Next.js App Router UI
+├── docker-compose.yml
+├── Dockerfile.backend
+├── requirements.txt
+├── LEARNING.md       # Deep dive for learning / interviews
+└── README.md
 ```
 
-Services: `db`, `redis`, `web`, `worker`, `beat`, `frontend`.
+---
+
+## Resume bullet
+
+> Built **PipelineHQ**, a multi-role B2B SaaS sales CRM with Django REST, JWT RBAC, PostgreSQL, and Celery/Redis for async lead import, notifications, sequence cadence, overdue-task alerts, stale-deal scanning, and forecast/analytics export; shipped a responsive Next.js client with global search, MEDDIC stage gates, deal comments/@mentions, tasks, pipeline filters, and manager forecasting.
 
 ---
 
-## Resume bullet (suggested)
+## License / attribution
 
-> Built PipelineHQ, a multi-role B2B SaaS sales CRM with Django REST, JWT RBAC, PostgreSQL, and Celery/Redis for async lead import, notifications, sequence cadence, overdue-task alerts, stale-deal scanning, and forecast/analytics export; shipped a responsive Next.js client with global search, MEDDIC stage gates, deal comments/@mentions, tasks, pipeline filters, and manager forecasting.
+A [Vaporware-Road](https://github.com/Vaporware-road) product.  
+Demo credentials are for local portfolio use only — do not use these passwords in production.
