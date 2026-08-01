@@ -1,0 +1,300 @@
+# PipelineHQ — Full Technical Structure (Learning Guide)
+
+This document explains **everything that was built** and **why**, so you can extend the system with confidence.
+
+---
+
+## 1. Big picture
+
+```text
+Browser (Next.js)
+    │  HTTPS/JSON + JWT Bearer token
+    ▼
+Django REST API  ──►  PostgreSQL   (source of truth)
+    │
+    ├─► Redis cache   (dashboard KPIs + analytics)
+    │
+    └─► Redis broker  ──► Celery Worker  (emails, CSV, exports, scans, sequences)
+                              ▲
+                         Celery Beat (schedules hourly/nightly tasks)
+```
+
+**Idea:** HTTP requests should be *fast*. Anything slow or “fire-and-forget” goes to Celery.
+
+---
+
+## 2. Repository layout
+
+```text
+Untitled/
+├── backend/                 # Django project
+│   ├── manage.py
+│   ├── config/              # Project settings, URLs, Celery app
+│   │   ├── settings.py
+│   │   ├── urls.py
+│   │   ├── celery.py        # Celery instance
+│   └── apps/
+│       ├── accounts/        # Custom User + auth endpoints
+│       └── crm/             # Domain + automation + analytics
+├── frontend/                # Next.js App Router UI
+│   └── src/
+│       ├── app/             # Pages (login, dashboard, pipeline…)
+│       ├── components/      # Shell, charts, notification bell
+│       └── lib/             # api.ts, auth.tsx, types.ts
+├── docker-compose.yml
+├── Dockerfile.backend
+├── requirements.txt
+├── README.md
+└── LEARNING.md              # this file
+```
+
+---
+
+## 3. Backend deep dive
+
+### 3.1 Django project (`config/`)
+
+| File | Job |
+|------|-----|
+| `settings.py` | Apps, DB, JWT, CORS, Redis cache, Celery config |
+| `urls.py` | Routes `/api/...` and Django admin |
+| `celery.py` | Creates Celery app; `autodiscover_tasks()` finds `@shared_task` |
+
+**Custom user:** `AUTH_USER_MODEL = "accounts.User"` with a `role` field (`SDR`, `AE`, `MANAGER`).
+
+### 3.2 CRM domain model (`apps/crm/models.py`)
+
+Classic Salesforce-like objects plus PipelineHQ upgrades:
+
+| Model | Meaning |
+|-------|---------|
+| `Lead` | Unqualified person/company interest |
+| `Account` | Company |
+| `Contact` | Person at a company |
+| `Opportunity` | Deal with stage, amount, forecast, **MEDDIC** fields, win/loss reasons |
+| `Activity` | Call/email/meeting/note on a deal |
+| `DealComment` | Notes on a deal; `@username` mentions → notifications |
+| `Task` | Reminders tied to lead/opportunity (also created by sequences) |
+| `Notification` | In-app inbox (assignment, mention, stage, sequence, task due) |
+| `LeadRoutingRule` | Round-robin auto-assign for new leads |
+| `EmailTemplate` / `Sequence` / `SequenceStep` / `SequenceEnrollment` | Lightweight outbound cadence |
+| `JobRun` | Tracks async Celery jobs for the UI |
+
+**Lead conversion** (`LeadConvertSerializer`) runs in a **DB transaction**:
+
+1. Create Account  
+2. Create Contact  
+3. Create Opportunity  
+4. Mark Lead `converted` + store FKs  
+
+That atomicity is an important interview talking point.
+
+### 3.3 API layer (DRF)
+
+- **ViewSets** give list/create/retrieve/update/delete for free.
+- **Serializers** validate input and shape JSON output.
+- **Permissions** (`RoleScopedAccess`, `IsManager`, …):
+  - Managers see team-wide data
+  - SDR/AE mostly see records they own
+- **Filters**: `django-filter` + search/ordering on list endpoints.
+
+Important custom actions:
+
+- `POST /api/leads/{id}/convert/`
+- `POST /api/leads/import-csv/` → creates `JobRun` → `import_leads_csv.delay(...)`
+- `GET /api/search/?q=` → role-scoped global search (leads, accounts, contacts, deals)
+- `GET /api/opportunities/pipeline/` → columns for Kanban
+- `GET|POST /api/opportunities/{id}/comments/` → deal comments (+ mention fan-out)
+- Richer list filters: leads (`status` multi, owner, created date range); opps (amount range, close date, owner, stale)
+- `GET /api/dashboard/` → Redis-cached aggregates
+- `GET /api/analytics/overview|funnel|activity/?from=&to=` → date-ranged KPIs
+- `POST /api/analytics/export/` → Celery CSV export
+- `POST /api/forecast/` → forecast CSV via Celery
+- `GET /api/notifications/` + `POST .../mark-read/`
+- `GET|PATCH /api/routing-rules/` (manager)
+- Sequences / enrollments / email templates under `/api/sequences/`, etc.
+- `POST /api/ops/<action>/` → stale-scan / warm-cache / reset-demo / advance-sequences
+
+### 3.4 Automation (`automation.py`)
+
+- **MEDDIC stage gates** — Proposal needs `champion` + `identify_pain`; Negotiation also needs `economic_buyer`; closed won/lost need reasons.
+- **Lead routing** — on create without owner, round-robin SDRs and notify assignee.
+- **Mentions** — `notify_comment_mentions()` parses `@username` in `DealComment.body`.
+
+### 3.5 Celery tasks (`apps/crm/tasks.py`)
+
+| Task name | Trigger | What it does |
+|-----------|---------|--------------|
+| `crm.send_notification_email` | Lead create/convert, stage change | Console/SMTP email |
+| `crm.import_leads_csv` | CSV import endpoint | Creates leads in bulk |
+| `crm.export_forecast_csv` | Manager export | Writes CSV to `media/exports/` |
+| `crm.export_analytics_csv` | Reports export | Analytics CSV via Celery |
+| `crm.flag_stale_deals` | Beat hourly + Manager button | Sets `Opportunity.is_stale` |
+| `crm.warm_dashboard_cache` | Beat nightly + Manager button | Precomputes KPI payloads |
+| `crm.advance_sequence_enrollments` | Beat + Manager button | Creates tasks + notifications for due steps |
+| `crm.notify_overdue_tasks` | Beat hourly | Notifies owners of overdue incomplete tasks |
+| `crm.reset_demo_data` | Manager Settings | Re-runs `seed_demo --reset` |
+
+**Beat schedules** are stored in DB via `django-celery-beat` (`setup_periodic_tasks` command).
+
+### 3.6 Caching
+
+- Dashboard: `dashboard:user:{id}` in Redis with short TTL; busted on writes.
+- Analytics: keys include user + date-range + kind; invalidated on relevant writes.
+
+### 3.7 Auth
+
+1. `POST /api/auth/token/` → access + refresh JWT (SimpleJWT)  
+2. Frontend stores tokens as `pipelinehq_access` / `pipelinehq_refresh`  
+3. Every API call sends `Authorization: Bearer <token>`  
+4. `POST /api/auth/demo-login/` issues tokens for seeded users (portfolio convenience)
+
+---
+
+## 4. Frontend deep dive
+
+### 4.1 Auth flow (`src/lib/auth.tsx`)
+
+`AuthProvider` wraps the app:
+
+- On load: if token exists → `GET /api/auth/me/`
+- Login: password or demo role button
+- Logout: clear tokens
+
+### 4.2 API client (`src/lib/api.ts`)
+
+Central `api()` helper:
+
+- Prefixes `NEXT_PUBLIC_API_URL`
+- Attaches JWT
+- Throws `ApiError` on non-2xx
+- `apiList()` unwraps DRF pagination `{ results: [...] }`
+
+### 4.3 Pages (App Router)
+
+| Route | Purpose |
+|-------|---------|
+| `/login` | Demo + password login |
+| `/dashboard` | Role-scoped KPIs + date-range analytics charts |
+| `/leads` | CRUD + convert + CSV import + advanced filters |
+| `/pipeline` | Kanban + stage moves + filters + win/loss close modal |
+| `/opportunities/[id]` | Deal fields, MEDDIC checklist, comments, tasks, activity timeline |
+| `/tasks` | Mine / overdue / all; complete toggles |
+| `/accounts` | Accounts & contacts tables |
+| `/sequences` | Templates, sequences, enrollments, advance due steps |
+| `/forecast` | Rollups + manager ops |
+| `/reports` | Funnel + activity + CSV export |
+| `/jobs` | Poll Celery `JobRun` rows |
+| `/settings` | Manager: lead routing + **reset demo** |
+
+`AppShell` is the responsive chrome (mobile menu + desktop nav + **Cmd/Ctrl+K search** + Alerts bell).
+
+---
+
+## 5. Data flow examples (study these)
+
+### A) Convert a lead
+
+```text
+UI Convert button
+  → POST /api/leads/5/convert/
+  → LeadConvertSerializer.save()  [atomic]
+  → enqueue_notification.delay(...)
+  → JSON { lead, account, contact, opportunity }
+Celery worker prints email to console
+```
+
+### B) CSV import (async)
+
+```text
+UI Queue import
+  → POST /api/leads/import-csv/  (returns 202 + JobRun)
+  → Redis queue
+  → Worker import_leads_csv
+  → JobRun.status = success
+UI Jobs page polls /api/jobs/
+```
+
+### C) MEDDIC gate + comment mention
+
+```text
+AE tries Proposal without champion
+  → PATCH opportunity stage
+  → validate_stage_transition → 400 field errors
+AE fills checklist, posts comment "@manager ready for review"
+  → DealComment created
+  → notify_comment_mentions → Notification for manager
+Manager Alerts bell shows unread mention
+```
+
+### D) Sequence advance
+
+```text
+Manager Sequences → Advance due steps
+  OR Celery Beat
+  → advance_sequence_enrollments
+  → Task "Send email: …" + Notification for owner
+```
+
+### E) Stale deals
+
+```text
+Celery Beat (hourly) OR Manager "Run stale scan"
+  → flag_stale_deals
+  → opportunities with no recent activity get is_stale=True
+  → Dashboard shows stale count
+```
+
+---
+
+## 6. How to extend (practice projects)
+
+1. **Real email** — swap console backend for SMTP/SendGrid inside the Celery task.  
+2. **WebSockets** — Django Channels to push JobRun / notification completion (no polling).  
+3. **Tests** — pytest for lead conversion transaction + MEDDIC permission matrix.  
+4. **Quote line items** — Opportunity → Quote → LineItem with discount approval.  
+5. **Territories** — assign Accounts to regions; managers filter by territory.  
+6. **Deep-link search hits** — open a lead/account detail route instead of list pages.
+
+---
+
+## 7. Interview talking points
+
+- Why separate **Lead** vs **Contact/Account/Opportunity**  
+- Why conversion is a **transaction**  
+- Why Celery exists (request latency, retries, scheduling)  
+- Difference between **broker** (Redis) and **result backend** (`django-db`)  
+- How **RBAC** differs for SDR vs AE vs Manager  
+- How **MEDDIC gates** encode sales process in the API (not only the UI)  
+- How Redis caching interacts with invalidation on writes  
+- Why JWT on a SPA + CORS configuration is required  
+
+---
+
+## 8. Commands cheat sheet
+
+```bash
+# migrations
+python manage.py makemigrations
+python manage.py migrate
+
+# demo data
+python manage.py seed_demo --reset
+python manage.py setup_periodic_tasks
+
+# processes
+python manage.py runserver 8000
+celery -A config worker -l info
+celery -A config beat -l info
+npm run dev   # in frontend/
+```
+
+You now have the map. Read code in this order for best learning:
+
+1. `apps/crm/models.py`  
+2. `apps/crm/serializers.py` (especially convert + MEDDIC validation)  
+3. `apps/crm/automation.py` + `analytics.py`  
+4. `apps/crm/views.py`  
+5. `apps/crm/tasks.py`  
+6. `frontend/src/lib/api.ts` + `auth.tsx`  
+7. One page at a time: `leads` → `pipeline` → `opportunities/[id]` → `tasks` → `reports` → `settings`
