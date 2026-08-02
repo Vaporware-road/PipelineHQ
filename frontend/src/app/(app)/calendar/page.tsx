@@ -108,7 +108,7 @@ export default function CalendarPage() {
     [meetings, selectedId],
   );
 
-  async function load() {
+  async function load(signal?: { cancelled: boolean }) {
     try {
       const params = new URLSearchParams({
         ordering: "starts_at",
@@ -122,17 +122,97 @@ export default function CalendarPage() {
         apiList<Meeting>(`/api/meetings/?${params}`),
         apiList<AvailabilitySlot>("/api/availability/"),
       ]);
+      if (signal?.cancelled) return;
       setMeetings(m);
       setSlots(s);
       setError("");
     } catch (e) {
+      if (signal?.cancelled) return;
       setError(e instanceof Error ? e.message : "Failed to load calendar");
     }
   }
 
   useEffect(() => {
-    load();
-  }, [anchor.getTime(), view, roleFilter, user?.id, isManager]);
+    const signal = { cancelled: false };
+    load(signal);
+    return () => {
+      signal.cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load closes over current filter state
+  }, [anchor, weekEnd, view, roleFilter, user?.id, isManager]);
+
+  function setAllMeetingsView() {
+    setView("all");
+    setRoleFilter("");
+  }
+
+  function setByRoleView() {
+    setView("role");
+    if (!roleFilter) setRoleFilter("SDR");
+  }
+
+  async function cancelMeeting(meetingId: number) {
+    if (!isManager) return;
+    setBusy(true);
+    setError("");
+    setSaveOk("");
+    try {
+      const updated = await api<Meeting>(`/api/meetings/${meetingId}/`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "cancelled" }),
+      });
+      setMeetings((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
+      if (selectedId === meetingId) {
+        setDraft(draftFromMeeting(updated));
+        setDirty(false);
+      }
+      setSaveOk("Meeting canceled.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Cancel failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function rescheduleMeeting(meetingId: number) {
+    if (!isManager || !draft) return;
+    if (!draft.starts_at || !draft.ends_at) {
+      setError("Set new start and end times to reschedule.");
+      return;
+    }
+    if (new Date(draft.ends_at) <= new Date(draft.starts_at)) {
+      setError("End time must be after start time.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    setSaveOk("");
+    try {
+      const updated = await api<Meeting>(`/api/meetings/${meetingId}/`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          status: "scheduled",
+          starts_at: draft.starts_at,
+          ends_at: draft.ends_at,
+          title: draft.title,
+          job_detail: draft.job_detail,
+          target_role: draft.target_role || "",
+          invitee_name: draft.invitee_name,
+          invitee_email: draft.invitee_email,
+          notes: draft.notes,
+        }),
+      });
+      setMeetings((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
+      setDraft(draftFromMeeting(updated));
+      setDirty(false);
+      setSaveOk("Meeting rescheduled.");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Reschedule failed");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function addSlot(e: React.FormEvent) {
     e.preventDefault();
@@ -282,10 +362,10 @@ export default function CalendarPage() {
           <div className="flex flex-wrap gap-2">
             {isManager ? (
               <>
-                <Button variant={view === "all" ? "primary" : "ghost"} onClick={() => setView("all")}>
+                <Button variant={view === "all" ? "primary" : "ghost"} onClick={setAllMeetingsView}>
                   All meetings
                 </Button>
-                <Button variant={view === "role" ? "primary" : "ghost"} onClick={() => setView("role")}>
+                <Button variant={view === "role" ? "primary" : "ghost"} onClick={setByRoleView}>
                   By role
                 </Button>
               </>
@@ -305,11 +385,7 @@ export default function CalendarPage() {
       {isManager && view === "role" ? (
         <div className="mb-3 flex flex-wrap gap-2">
           {(["SDR", "AE", "MANAGER", "ALL"] as const).map((r) => (
-            <Button
-              key={r}
-              variant={roleFilter === r ? "primary" : "ghost"}
-              onClick={() => setRoleFilter(roleFilter === r ? "" : r)}
-            >
+            <Button key={r} variant={roleFilter === r ? "primary" : "ghost"} onClick={() => setRoleFilter(r)}>
               {targetRoleLabel(r)}
             </Button>
           ))}
@@ -336,39 +412,95 @@ export default function CalendarPage() {
         </Card>
       ) : null}
 
-      <div className="mb-4 grid gap-2 sm:grid-cols-7">
+      <div className="cal-week-scroll">
         {days.map((day) => {
           const key = dateKey(day);
+          const isTodayColumn = key === dateKey(new Date());
           const dayMeetings = meetings.filter((m) => localDayKey(m.starts_at) === key);
+          const overflow = dayMeetings.length > 2;
+          const eventCols = Math.max(1, Math.ceil(dayMeetings.length / 2));
           return (
-            <Card key={key} className="min-h-40 !p-3">
-              <p className="text-xs uppercase tracking-wide text-[var(--muted)]">
+            <Card
+              key={key}
+              className={`cal-day-lane min-h-40 !p-3 ${overflow ? "cal-day-lane--wide" : ""} ${
+                isTodayColumn
+                  ? "!border-[rgba(0,229,255,0.35)] shadow-[0_0_20px_rgba(0,229,255,0.12)]"
+                  : ""
+              }`}
+              style={
+                overflow
+                  ? { width: `calc(${eventCols} * 9.5rem + ${(eventCols - 1) * 0.5}rem + 1.5rem)` }
+                  : { width: "9.5rem" }
+              }
+            >
+              <p
+                className={`text-xs uppercase tracking-[0.14em] ${
+                  isTodayColumn
+                    ? "font-[family-name:var(--font-display)] text-[var(--cyan)] [text-shadow:0_0_10px_rgba(0,229,255,0.55)]"
+                    : "text-[var(--muted)]"
+                }`}
+              >
                 {WEEKDAYS[day.getDay() === 0 ? 6 : day.getDay() - 1]} {day.getMonth() + 1}/{day.getDate()}
+                {isTodayColumn ? " · Today" : ""}
+                {dayMeetings.length > 0 ? (
+                  <span className="ml-1 text-[var(--muted)] normal-case tracking-normal">
+                    ({dayMeetings.length})
+                  </span>
+                ) : null}
               </p>
-              <div className="mt-2 space-y-2">
-                {dayMeetings.map((m) => (
-                  <div
-                    key={m.id}
-                    className={`rounded border px-2 py-1.5 text-left text-xs ${
-                      selectedId === m.id
-                        ? "border-[var(--cyan)] bg-[var(--input)]"
-                        : "border-[var(--line)] bg-[var(--input)]"
-                    }`}
-                  >
-                    <p className="font-medium">{m.title}</p>
-                    <p className="text-[var(--muted)]">{formatDateTime(m.starts_at)}</p>
-                    <p className="text-[var(--cyan)]">{m.invitee_name}</p>
-                    {m.target_role ? <Badge>{targetRoleLabel(m.target_role)}</Badge> : null}
-                    <Button
-                      type="button"
-                      variant={selectedId === m.id ? "primary" : "ghost"}
-                      className="mt-1.5 w-full !px-2 !py-1 text-[11px]"
-                      onClick={() => openDetails(m)}
-                    >
-                      {selectedId === m.id ? "Viewing details" : "View details"}
-                    </Button>
-                  </div>
-                ))}
+              <div className={`mt-2 ${overflow ? "cal-day-events" : "cal-day-events cal-day-events--single"}`}>
+                {dayMeetings.map((m) => {
+                  const canceled = m.status === "cancelled";
+                  const isToday = !canceled && localDayKey(m.starts_at) === dateKey(new Date());
+                  const eventClass = [
+                    "cal-event px-2 py-1.5 text-left text-xs",
+                    canceled ? "cal-event--canceled" : "",
+                    isToday ? "cal-event--today" : "",
+                    selectedId === m.id ? "cal-event--selected" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ");
+                  return (
+                    <div key={m.id} className={eventClass}>
+                      {canceled ? <p className="cal-event__tag cal-event__tag--canceled mb-0.5">Canceled</p> : null}
+                      {isToday ? <p className="cal-event__tag cal-event__tag--today mb-0.5">Today</p> : null}
+                      <p
+                        className={`font-medium ${
+                          canceled
+                            ? "text-[var(--danger)] line-through decoration-[var(--danger)]/70"
+                            : isToday
+                              ? "text-[var(--cyan)]"
+                              : ""
+                        }`}
+                      >
+                        {m.title}
+                      </p>
+                      <p className="text-[var(--muted)]">{formatDateTime(m.starts_at)}</p>
+                      <p className={canceled ? "text-[var(--danger)]/80" : "text-[var(--cyan)]"}>{m.invitee_name}</p>
+                      {m.target_role ? <Badge>{targetRoleLabel(m.target_role)}</Badge> : null}
+                      <Button
+                        type="button"
+                        variant={selectedId === m.id ? "primary" : "ghost"}
+                        className="mt-1.5 w-full !px-2 !py-1 text-[11px]"
+                        onClick={() => openDetails(m)}
+                      >
+                        {selectedId === m.id ? "Viewing details" : "View details"}
+                      </Button>
+                      {isManager && canceled ? (
+                        <Button
+                          type="button"
+                          className="mt-1 w-full !px-2 !py-1 text-[11px]"
+                          disabled={busy}
+                          onClick={() => {
+                            openDetails(m);
+                          }}
+                        >
+                          Reschedule…
+                        </Button>
+                      ) : null}
+                    </div>
+                  );
+                })}
                 {dayMeetings.length === 0 ? <p className="text-xs text-[var(--muted)]">—</p> : null}
               </div>
             </Card>
@@ -455,12 +587,32 @@ export default function CalendarPage() {
               <div>
                 <p className="text-xs uppercase tracking-wide text-[var(--muted)]">Meeting details</p>
                 <h2 className="font-[family-name:var(--font-display)] text-lg">{draft.title || selected.title}</h2>
+                {selected.status === "cancelled" || draft.status === "cancelled" ? (
+                  <p className="cal-event__tag cal-event__tag--canceled mt-1">Canceled</p>
+                ) : null}
               </div>
-              <Button variant="ghost" onClick={closeDetails}>
-                Close
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                {isManager && draft.status !== "cancelled" ? (
+                  <Button variant="ghost" disabled={busy} onClick={() => cancelMeeting(selected.id)}>
+                    Cancel event
+                  </Button>
+                ) : null}
+                {isManager && draft.status === "cancelled" ? (
+                  <Button disabled={busy} onClick={() => rescheduleMeeting(selected.id)}>
+                    {busy ? "Rescheduling…" : "Reschedule"}
+                  </Button>
+                ) : null}
+                <Button variant="ghost" onClick={closeDetails}>
+                  Close
+                </Button>
+              </div>
             </div>
             <p className="mt-1 text-sm text-[var(--muted)]">Host {selected.host?.username}</p>
+            {isManager && draft.status === "cancelled" ? (
+              <p className="mt-2 rounded border border-[rgba(0,229,255,0.35)] bg-[rgba(0,229,255,0.08)] px-3 py-2 text-xs text-[var(--cyan)] [text-shadow:0_0_8px_rgba(0,229,255,0.35)]">
+                Pick new start and end times below, then hit Reschedule to restore this event.
+              </p>
+            ) : null}
             {isManager ? (
               <form className="mt-3 grid gap-3" onSubmit={saveDetails}>
                 <label className="block text-xs uppercase tracking-wide text-[var(--muted)]">
@@ -521,29 +673,31 @@ export default function CalendarPage() {
                 </label>
                 <DatePicker
                   mode="datetime"
-                  placeholder="Starts"
+                  placeholder={draft.status === "cancelled" ? "New start time" : "Starts"}
                   value={draft.starts_at}
                   onChange={(starts_at) => patchDraft({ starts_at })}
                 />
                 <DatePicker
                   mode="datetime"
-                  placeholder="Ends"
+                  placeholder={draft.status === "cancelled" ? "New end time" : "Ends"}
                   value={draft.ends_at}
                   onChange={(ends_at) => patchDraft({ ends_at })}
                 />
-                <label className="block text-xs uppercase tracking-wide text-[var(--muted)]">
-                  Status
-                  <Select
-                    className="mt-1"
-                    value={draft.status}
-                    disabled={busy}
-                    onChange={(e) => patchDraft({ status: e.target.value })}
-                  >
-                    <option value="scheduled">Scheduled</option>
-                    <option value="completed">Completed</option>
-                    <option value="cancelled">Cancelled</option>
-                  </Select>
-                </label>
+                {draft.status !== "cancelled" ? (
+                  <label className="block text-xs uppercase tracking-wide text-[var(--muted)]">
+                    Status
+                    <Select
+                      className="mt-1"
+                      value={draft.status}
+                      disabled={busy}
+                      onChange={(e) => patchDraft({ status: e.target.value })}
+                    >
+                      <option value="scheduled">Scheduled</option>
+                      <option value="completed">Completed</option>
+                      <option value="cancelled">Cancelled</option>
+                    </Select>
+                  </label>
+                ) : null}
                 <label className="block text-xs uppercase tracking-wide text-[var(--muted)]">
                   Notes
                   <Textarea
@@ -633,7 +787,14 @@ export default function CalendarPage() {
                 .
               </p>
               {bookingUrl ? (
-                <p className="mt-3 break-all font-mono text-sm text-[var(--cyan)]">{bookingUrl}</p>
+                <Link
+                  href={user?.booking_slug ? `/book/${user.booking_slug}` : bookingUrl}
+                  className="mt-3 inline-block text-sm font-medium text-[var(--cyan)] underline hover:opacity-90"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open public booking page
+                </Link>
               ) : (
                 <Empty>Add a booking slug on Profile to enable public booking.</Empty>
               )}

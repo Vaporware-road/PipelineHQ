@@ -1,4 +1,4 @@
-import { forwardRef, type ReactNode } from "react";
+import { forwardRef, type CSSProperties, type ReactNode } from "react";
 import { formatMoney } from "@/lib/format";
 
 export function PageHeader({
@@ -23,10 +23,19 @@ export function PageHeader({
   );
 }
 
-export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
+export function Card({
+  children,
+  className = "",
+  style,
+}: {
+  children: ReactNode;
+  className?: string;
+  style?: CSSProperties;
+}) {
   return (
     <div
       className={`rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 shadow-[0_0_0_1px_rgba(0,229,255,0.04),0_0_28px_rgba(255,43,214,0.08)] ${className}`}
+      style={style}
     >
       {children}
     </div>
