@@ -7,5 +7,4 @@ class CrmConfig(AppConfig):
     label = "crm"
 
     def ready(self):
-        # Import signals/tasks registration side effects if added later.
-        pass
+        from . import signals  # noqa: F401

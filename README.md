@@ -68,8 +68,8 @@ python manage.py seed_demo --reset
 python manage.py setup_periodic_tasks
 cd ..
 
-# 3) API
-cd backend && python manage.py runserver 8000
+# 3) API (Daphne — required for WebSocket realtime)
+cd backend && daphne -b 127.0.0.1 -p 8000 config.asgi:application
 
 # 4) Celery worker (required for imports, exports, sequences, reset)
 cd backend && celery -A config worker -l info

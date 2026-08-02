@@ -15,6 +15,7 @@ type ProfileForm = {
   email: string;
   title: string;
   phone: string;
+  booking_slug: string;
 };
 
 export default function ProfilePage() {
@@ -25,6 +26,7 @@ export default function ProfilePage() {
     email: "",
     title: "",
     phone: "",
+    booking_slug: "",
   });
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -45,6 +47,7 @@ export default function ProfilePage() {
       email: user.email || "",
       title: user.title || "",
       phone: user.phone || "",
+      booking_slug: user.booking_slug || "",
     });
   }, [user]);
 
@@ -179,6 +182,21 @@ export default function ProfilePage() {
               onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
               autoComplete="tel"
             />
+          </label>
+          <label className="block text-sm sm:col-span-2">
+            <span className="mb-1 block text-[var(--muted)]">Booking slug</span>
+            <Input
+              value={form.booking_slug}
+              onChange={(e) => setForm((f) => ({ ...f, booking_slug: e.target.value }))}
+              placeholder="e.g. ava-ae"
+            />
+            <span className="mt-1 block text-xs text-[var(--muted)]">
+              Public link: /book/{form.booking_slug || "…"} — manage slots on{" "}
+              <Link href="/calendar" className="underline">
+                Calendar
+              </Link>
+              .
+            </span>
           </label>
           <div className="flex items-center gap-3 sm:col-span-2">
             <Button type="submit" disabled={busyProfile}>

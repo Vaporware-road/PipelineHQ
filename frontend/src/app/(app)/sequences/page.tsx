@@ -135,7 +135,7 @@ export default function SequencesPage() {
     <div>
       <PageHeader
         title="Sequences"
-        subtitle="Lightweight email cadences — steps create tasks + notifications (console email)."
+        subtitle="Email cadences that deliver to the lead via Celery (console/SMTP) with open/click tracking."
         actions={
           user?.role === "MANAGER" ? (
             <Button disabled={busy} onClick={advanceNow}>

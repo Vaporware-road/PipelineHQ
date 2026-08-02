@@ -17,21 +17,38 @@ from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.crm.automation import ensure_default_routing_rule
+from apps.crm.deal_health import apply_deal_health
 from apps.crm.models import (
     Account,
     Activity,
+    AiSuggestion,
+    AuditEvent,
+    AvailabilitySlot,
     Contact,
+    CustomFieldDefinition,
+    CustomFieldValue,
     DealComment,
+    EmailMessage,
     EmailTemplate,
     JobRun,
     Lead,
+    LeadRoutingRule,
+    Meeting,
     Notification,
     Opportunity,
+    Product,
+    Quote,
+    QuoteLineItem,
     Sequence,
     SequenceEnrollment,
     SequenceStep,
     Task,
+    Territory,
+    TimelineEvent,
 )
+from apps.crm.custom_fields import set_custom_fields
+from apps.crm.ai_assists import generate_deal_summary, generate_next_action
+from apps.crm.scoring import apply_lead_score
 
 
 DEMO_PASSWORD = "demo1234"
@@ -49,7 +66,18 @@ class Command(BaseCommand):
             SequenceEnrollment.objects.all().delete()
             SequenceStep.objects.all().delete()
             Sequence.objects.all().delete()
+            QuoteLineItem.objects.all().delete()
+            Quote.objects.all().delete()
+            Product.objects.all().delete()
+            CustomFieldValue.objects.all().delete()
+            CustomFieldDefinition.objects.all().delete()
+            AuditEvent.objects.all().delete()
+            AiSuggestion.objects.all().delete()
+            EmailMessage.objects.all().delete()
             EmailTemplate.objects.all().delete()
+            Meeting.objects.all().delete()
+            AvailabilitySlot.objects.all().delete()
+            TimelineEvent.objects.all().delete()
             Task.objects.all().delete()
             DealComment.objects.all().delete()
             Notification.objects.all().delete()
@@ -58,13 +86,20 @@ class Command(BaseCommand):
             Contact.objects.all().delete()
             Account.objects.all().delete()
             Lead.objects.all().delete()
+            LeadRoutingRule.objects.all().delete()
+            Territory.objects.all().delete()
             JobRun.objects.all().delete()
 
         users = self._ensure_users()
         ensure_default_routing_rule()
         self._seed_leads(users["sdr"], users["ae"])
         self._seed_pipeline(users)
+        self._seed_products_and_quotes(users)
+        self._seed_platform(users)
+        self._seed_ai_assists(users)
         self._seed_automation(users)
+        self._seed_comms(users)
+        self._refresh_scores_and_health()
         self.stdout.write(self.style.SUCCESS("Demo data ready."))
         self.stdout.write("Logins (password for all: demo1234)")
         self.stdout.write("  sdr / ae / ae2 / manager")
@@ -94,6 +129,8 @@ class Command(BaseCommand):
             user.last_name = last
             user.email = email
             user.title = title
+            if not user.booking_slug:
+                user.booking_slug = username
             user.set_password(DEMO_PASSWORD)
             user.save()
             users[username] = user
@@ -105,19 +142,20 @@ class Command(BaseCommand):
             self.stdout.write("Leads already present — skipping lead seed (use --reset).")
             return
         samples = [
-            ("Priya Shah", "priya@northwind.io", "Northwind Analytics", "VP Sales", Lead.Source.WEBSITE),
-            ("Jon Lee", "jon@brightledger.com", "BrightLedger", "CTO", Lead.Source.OUTBOUND),
-            ("Maya Chen", "maya@orbitops.co", "OrbitOps", "Head of RevOps", Lead.Source.REFERRAL),
-            ("Diego Alvarez", "diego@stackform.dev", "Stackform", "Founder", Lead.Source.EVENT),
-            ("Elena Rossi", "elena@copperhq.com", "CopperHQ", "Director IT", Lead.Source.WEBSITE),
-            ("Chris Park", "chris@signalbay.io", "SignalBay", "CRO", Lead.Source.OUTBOUND),
+            ("Priya Shah", "priya@northwind.io", "Northwind Analytics", "VP Sales", "Analytics", Lead.Source.WEBSITE),
+            ("Jon Lee", "jon@brightledger.com", "BrightLedger", "CTO", "Fintech", Lead.Source.OUTBOUND),
+            ("Maya Chen", "maya@orbitops.co", "OrbitOps", "Head of RevOps", "SaaS", Lead.Source.REFERRAL),
+            ("Diego Alvarez", "diego@stackform.dev", "Stackform", "Founder", "Software", Lead.Source.EVENT),
+            ("Elena Rossi", "elena@copperhq.com", "CopperHQ", "Director IT", "Cloud", Lead.Source.WEBSITE),
+            ("Chris Park", "chris@signalbay.io", "SignalBay", "CRO", "SaaS", Lead.Source.OUTBOUND),
         ]
-        for name, email, company, title, source in samples:
+        for name, email, company, title, industry, source in samples:
             Lead.objects.create(
                 name=name,
                 email=email,
                 company=company,
                 title=title,
+                industry=industry,
                 source=source,
                 status=choice([Lead.Status.NEW, Lead.Status.CONTACTED, Lead.Status.QUALIFIED]),
                 owner=sdr,
@@ -207,6 +245,7 @@ class Command(BaseCommand):
                 forecast_category=forecast,
                 next_step="Schedule technical deep-dive" if stage != Opportunity.Stage.CLOSED_LOST else "",
                 owner=owner,
+                stage_entered_at=timezone.now() - timedelta(days=randint(3, 40)),
                 is_stale=(
                     i % 5 == 0
                     and stage
@@ -364,3 +403,306 @@ class Command(BaseCommand):
             link="/admin",
         )
         self.stdout.write("Seeded email templates, sequence, enrollment, tasks, notifications.")
+
+    def _seed_comms(self, users: dict[str, User]):
+        from datetime import time
+
+        from apps.crm.email_tracking import new_tracking_token, text_to_html
+
+        if AvailabilitySlot.objects.exists():
+            self.stdout.write("Comms data already present — skipping (use --reset).")
+            return
+
+        ae = users["ae"]
+        sdr = users["sdr"]
+        for user in (ae, sdr):
+            for weekday in range(0, 5):
+                AvailabilitySlot.objects.create(
+                    user=user,
+                    weekday=weekday,
+                    start_time=time(10, 0),
+                    end_time=time(10, 30),
+                )
+                AvailabilitySlot.objects.create(
+                    user=user,
+                    weekday=weekday,
+                    start_time=time(14, 0),
+                    end_time=time(14, 30),
+                )
+
+        opp = Opportunity.objects.filter(owner=ae).first()
+        lead = Lead.objects.filter(owner=sdr).first()
+        if opp:
+            Meeting.objects.create(
+                host=ae,
+                title="Discovery with primary contact",
+                starts_at=timezone.now() + timedelta(days=1, hours=2),
+                ends_at=timezone.now() + timedelta(days=1, hours=2, minutes=30),
+                invitee_name="Demo Prospect",
+                invitee_email="prospect@example.com",
+                opportunity=opp,
+            )
+            token = new_tracking_token()
+            EmailMessage.objects.create(
+                to_email="prospect@example.com",
+                subject="Thanks for the intro call",
+                body_text="Looking forward to the next step.\n\nSee https://pipelinehq.local/demo",
+                body_html=text_to_html(
+                    "Looking forward to the next step.\n\nSee https://pipelinehq.local/demo"
+                ),
+                status=EmailMessage.Status.SENT,
+                opportunity=opp,
+                sent_by=ae,
+                tracking_token=token,
+                sent_at=timezone.now() - timedelta(hours=3),
+                open_count=1,
+                opened_at=timezone.now() - timedelta(hours=1),
+            )
+        if lead:
+            Meeting.objects.create(
+                host=sdr,
+                title="Qualify call",
+                starts_at=timezone.now() + timedelta(days=2, hours=1),
+                ends_at=timezone.now() + timedelta(days=2, hours=1, minutes=30),
+                invitee_name=lead.name,
+                invitee_email=lead.email,
+                lead=lead,
+            )
+        self.stdout.write("Seeded availability, meetings, sample tracked email.")
+
+    def _seed_products_and_quotes(self, users: dict[str, User]):
+        if Product.objects.exists():
+            self.stdout.write("Products already present — skipping quotes seed (use --reset).")
+            return
+
+        ae = users["ae"]
+        platform = Product.objects.create(
+            name="PipelineHQ Platform",
+            sku="PHQ-PLAT",
+            description="Core CRM seats (annual)",
+            unit_price=Decimal("12000.00"),
+        )
+        seats = Product.objects.create(
+            name="Additional seats (10-pack)",
+            sku="PHQ-SEAT10",
+            description="Extra user seats",
+            unit_price=Decimal("2400.00"),
+        )
+        success = Product.objects.create(
+            name="Onboarding package",
+            sku="PHQ-ONB",
+            description="Implementation + training",
+            unit_price=Decimal("5000.00"),
+        )
+
+        proposal_opps = list(
+            Opportunity.objects.filter(
+                stage__in=[Opportunity.Stage.PROPOSAL, Opportunity.Stage.NEGOTIATION]
+            ).order_by("id")
+        )
+        if not proposal_opps:
+            self.stdout.write("No proposal/negotiation deals — products only.")
+            return
+
+        q1 = Quote.objects.create(
+            opportunity=proposal_opps[0],
+            name=f"{proposal_opps[0].account.name} — Standard quote",
+            status=Quote.Status.DRAFT,
+            discount_percent=Decimal("10.00"),
+            notes="Standard annual platform + seats.",
+            created_by=ae,
+        )
+        QuoteLineItem.objects.create(
+            quote=q1,
+            product=platform,
+            description=platform.name,
+            quantity=Decimal("1"),
+            unit_price=platform.unit_price,
+        )
+        QuoteLineItem.objects.create(
+            quote=q1,
+            product=seats,
+            description=seats.name,
+            quantity=Decimal("2"),
+            unit_price=seats.unit_price,
+        )
+
+        if len(proposal_opps) > 1:
+            q2 = Quote.objects.create(
+                opportunity=proposal_opps[1],
+                name=f"{proposal_opps[1].account.name} — Aggressive discount",
+                status=Quote.Status.PENDING_APPROVAL,
+                discount_percent=Decimal("28.00"),
+                notes="Needs manager approval (>20%).",
+                created_by=ae,
+            )
+            QuoteLineItem.objects.create(
+                quote=q2,
+                product=platform,
+                description=platform.name,
+                quantity=Decimal("1"),
+                unit_price=platform.unit_price,
+            )
+            QuoteLineItem.objects.create(
+                quote=q2,
+                product=success,
+                description=success.name,
+                quantity=Decimal("1"),
+                unit_price=success.unit_price,
+            )
+        else:
+            q2 = Quote.objects.create(
+                opportunity=proposal_opps[0],
+                name=f"{proposal_opps[0].account.name} — Aggressive discount",
+                status=Quote.Status.PENDING_APPROVAL,
+                discount_percent=Decimal("28.00"),
+                notes="Needs manager approval (>20%).",
+                created_by=ae,
+            )
+            QuoteLineItem.objects.create(
+                quote=q2,
+                product=platform,
+                description=platform.name,
+                quantity=Decimal("1"),
+                unit_price=platform.unit_price,
+            )
+
+        self.stdout.write(f"Seeded {Product.objects.count()} products and {Quote.objects.count()} quotes.")
+
+    def _seed_platform(self, users: dict[str, User]):
+        """Phase 4: territories, custom fields, sample values (audit grows via signals)."""
+        west, _ = Territory.objects.get_or_create(
+            name="West Coast",
+            defaults={"region": "US-West", "industry": "SaaS", "is_active": True},
+        )
+        east, _ = Territory.objects.get_or_create(
+            name="East Coast",
+            defaults={"region": "US-East", "industry": "Fintech", "is_active": True},
+        )
+        west.members.set([users["sdr"], users["ae"], users["manager"]])
+        east.members.set([users["ae2"], users["manager"]])
+
+        # Assign some accounts to territories
+        accounts = list(Account.objects.order_by("id")[:4])
+        for i, account in enumerate(accounts):
+            account.territory = west if i % 2 == 0 else east
+            account.save(update_fields=["territory", "updated_at"])
+
+        # Territory-aware routing rule
+        LeadRoutingRule.objects.get_or_create(
+            name="West Coast SDR routing",
+            defaults={
+                "enabled": True,
+                "source": "",
+                "strategy": LeadRoutingRule.Strategy.ROUND_ROBIN,
+                "territory": west,
+            },
+        )
+
+        defs = [
+            (
+                CustomFieldDefinition.Entity.LEAD,
+                "budget_range",
+                "Budget range",
+                CustomFieldDefinition.FieldType.SELECT,
+                ["<$10k", "$10k–50k", "$50k+"],
+            ),
+            (
+                CustomFieldDefinition.Entity.LEAD,
+                "use_case",
+                "Primary use case",
+                CustomFieldDefinition.FieldType.TEXT,
+                [],
+            ),
+            (
+                CustomFieldDefinition.Entity.ACCOUNT,
+                "employee_count",
+                "Employee count",
+                CustomFieldDefinition.FieldType.NUMBER,
+                [],
+            ),
+            (
+                CustomFieldDefinition.Entity.CONTACT,
+                "linkedin_url",
+                "LinkedIn URL",
+                CustomFieldDefinition.FieldType.TEXT,
+                [],
+            ),
+            (
+                CustomFieldDefinition.Entity.OPPORTUNITY,
+                "competitor",
+                "Primary competitor",
+                CustomFieldDefinition.FieldType.SELECT,
+                ["HubSpot", "Salesforce", "Pipedrive", "Other"],
+            ),
+            (
+                CustomFieldDefinition.Entity.OPPORTUNITY,
+                "renewal_date",
+                "Renewal date",
+                CustomFieldDefinition.FieldType.DATE,
+                [],
+            ),
+        ]
+        for entity, key, label, field_type, options in defs:
+            CustomFieldDefinition.objects.get_or_create(
+                entity=entity,
+                key=key,
+                defaults={
+                    "label": label,
+                    "field_type": field_type,
+                    "options": options,
+                    "is_active": True,
+                },
+            )
+
+        lead = Lead.objects.order_by("id").first()
+        if lead:
+            set_custom_fields(
+                "lead",
+                lead.pk,
+                {"budget_range": "$50k+", "use_case": "Outbound pipeline visibility"},
+            )
+        if accounts:
+            set_custom_fields("account", accounts[0].pk, {"employee_count": 120})
+        opp = Opportunity.objects.order_by("id").first()
+        if opp:
+            set_custom_fields(
+                "opportunity",
+                opp.pk,
+                {"competitor": "HubSpot", "renewal_date": (timezone.now() + timedelta(days=180)).date().isoformat()},
+            )
+
+        self.stdout.write(
+            f"Seeded {Territory.objects.count()} territories and "
+            f"{CustomFieldDefinition.objects.count()} custom fields."
+        )
+
+    def _seed_ai_assists(self, users: dict[str, User]):
+        if AiSuggestion.objects.exists():
+            self.stdout.write("AI suggestions already present — skipping (use --reset).")
+            return
+        opp = (
+            Opportunity.objects.filter(stage__in=[Opportunity.Stage.PROPOSAL, Opportunity.Stage.NEGOTIATION])
+            .select_related("account", "primary_contact", "owner")
+            .order_by("id")
+            .first()
+        )
+        if not opp:
+            opp = (
+                Opportunity.objects.select_related("account", "primary_contact", "owner")
+                .order_by("id")
+                .first()
+            )
+        if not opp:
+            self.stdout.write("No opportunities — skipping AI seed.")
+            return
+        generate_deal_summary(opp, user=users["manager"], use_llm=False)
+        generate_next_action(opp, user=users["ae"], use_llm=False)
+        self.stdout.write(f"Seeded {AiSuggestion.objects.count()} AI suggestions (rules).")
+
+    def _refresh_scores_and_health(self):
+        for lead in Lead.objects.all():
+            apply_lead_score(lead, save=True)
+        for opp in Opportunity.objects.all():
+            apply_deal_health(opp, save=True)
+        self.stdout.write("Refreshed lead scores and deal health.")

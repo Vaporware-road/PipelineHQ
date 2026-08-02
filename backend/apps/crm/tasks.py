@@ -27,8 +27,15 @@ def _set_job(job_id: int | None, **fields):
     if not job_id:
         return
     from .models import JobRun
+    from .realtime import push_job
 
     JobRun.objects.filter(pk=job_id).update(**fields, updated_at=timezone.now())
+    job = JobRun.objects.filter(pk=job_id).select_related("requested_by").first()
+    if job:
+        try:
+            push_job(job)
+        except Exception:
+            pass
 
 
 @shared_task(bind=True, name="crm.send_notification_email")
@@ -65,11 +72,19 @@ def flag_stale_deals(self, job_id: int | None = None):
     updated = qs.filter(id__in=stale_ids).update(is_stale=True)
     # Clear stale flag for deals that became active again
     cleared = qs.exclude(id__in=stale_ids).filter(is_stale=True).update(is_stale=False)
-    result = {"flagged": updated, "cleared": cleared, "cutoff": cutoff.isoformat()}
+    from .deal_health import refresh_open_deal_health
+
+    health_refreshed = refresh_open_deal_health()
+    result = {
+        "flagged": updated,
+        "cleared": cleared,
+        "health_refreshed": health_refreshed,
+        "cutoff": cutoff.isoformat(),
+    }
     _set_job(
         job_id,
         status=JobRun.Status.SUCCESS,
-        message=f"Flagged {updated} stale deals; cleared {cleared}.",
+        message=f"Flagged {updated} stale deals; cleared {cleared}; refreshed health on {health_refreshed}.",
         result_meta=result,
     )
     cache.delete_many(["dashboard:SDR", "dashboard:AE", "dashboard:MANAGER"])
@@ -257,14 +272,105 @@ def reset_demo_data(self, job_id: int | None = None):
     return {"ok": True}
 
 
+@shared_task(bind=True, name="crm.send_outbound_email")
+def send_outbound_email(self, email_message_id: int):
+    """Deliver a queued EmailMessage via Django email backend (console/SMTP)."""
+    from django.core.mail import EmailMultiAlternatives
+
+    from .automation import create_notification
+    from .email_tracking import inject_tracking, text_to_html
+    from .models import EmailMessage, Notification
+    from .timeline import record_timeline_event
+
+    msg = (
+        EmailMessage.objects.select_related(
+            "lead", "lead__owner", "opportunity", "opportunity__owner", "contact", "sent_by"
+        )
+        .filter(pk=email_message_id)
+        .first()
+    )
+    if not msg:
+        return {"error": "missing"}
+    if msg.status == EmailMessage.Status.SENT:
+        return {"id": msg.id, "status": "already_sent"}
+
+    html = msg.body_html or text_to_html(msg.body_text)
+    html = inject_tracking(html, msg.tracking_token)
+    text = msg.body_text or msg.subject
+    try:
+        mail = EmailMultiAlternatives(
+            subject=msg.subject,
+            body=text,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            to=[msg.to_email],
+        )
+        mail.attach_alternative(html, "text/html")
+        mail.send(fail_silently=False)
+        msg.status = EmailMessage.Status.SENT
+        msg.sent_at = timezone.now()
+        msg.body_html = html
+        msg.error = ""
+        msg.save(update_fields=["status", "sent_at", "body_html", "error", "updated_at"])
+    except Exception as exc:  # noqa: BLE001 — persist failure for UI
+        msg.status = EmailMessage.Status.FAILED
+        msg.error = str(exc)[:2000]
+        msg.save(update_fields=["status", "error", "updated_at"])
+        return {"id": msg.id, "status": "failed", "error": msg.error}
+
+    meta = {"id": msg.id, "to": msg.to_email}
+    if msg.opportunity_id:
+        record_timeline_event(
+            entity_type="opportunity",
+            entity_id=msg.opportunity_id,
+            event_type="email_sent",
+            title=f"Email sent: {msg.subject}",
+            body=f"To {msg.to_email}",
+            actor=msg.sent_by,
+            opportunity_id=msg.opportunity_id,
+            lead_id=msg.lead_id,
+            contact_id=msg.contact_id,
+            meta=meta,
+        )
+    if msg.lead_id:
+        record_timeline_event(
+            entity_type="lead",
+            entity_id=msg.lead_id,
+            event_type="email_sent",
+            title=f"Email sent: {msg.subject}",
+            body=f"To {msg.to_email}",
+            actor=msg.sent_by,
+            lead_id=msg.lead_id,
+            opportunity_id=msg.opportunity_id,
+            meta=meta,
+        )
+
+    notify_user = msg.sent_by
+    if msg.lead_id and msg.lead.owner_id:
+        notify_user = msg.lead.owner
+    elif msg.opportunity_id and msg.opportunity.owner_id:
+        notify_user = msg.opportunity.owner
+    if notify_user:
+        link = f"/opportunities/{msg.opportunity_id}" if msg.opportunity_id else (
+            f"/leads/{msg.lead_id}" if msg.lead_id else "/dashboard"
+        )
+        create_notification(
+            user=notify_user,
+            title=f"Email sent: {msg.subject}",
+            body=f"Delivered to {msg.to_email}",
+            kind=Notification.Kind.EMAIL,
+            link=link,
+        )
+    return {"id": msg.id, "status": "sent"}
+
+
 @shared_task(bind=True, name="crm.advance_sequence_enrollments")
 def advance_sequence_enrollments(self, job_id: int | None = None):
     """
-    Advance due email-sequence steps:
-    create a Task + in-app Notification, simulate send via console email.
+    Advance due email-sequence steps: create EmailMessage to the lead and send via Celery.
     """
     from .automation import create_notification
-    from .models import JobRun, Notification, SequenceEnrollment, Task
+    from .email_tracking import new_tracking_token, text_to_html
+    from .models import EmailMessage, JobRun, Notification, SequenceEnrollment
 
     _set_job(job_id, status=JobRun.Status.RUNNING, celery_task_id=self.request.id)
     now = timezone.now()
@@ -294,26 +400,26 @@ def advance_sequence_enrollments(self, job_id: int | None = None):
         body = template.body.replace("{{name}}", enrollment.lead.name).replace(
             "{{company}}", enrollment.lead.company
         )
-        Task.objects.create(
-            title=f"Send email: {subject}",
-            description=body,
-            due_at=now,
-            owner=owner,
+        msg = EmailMessage.objects.create(
+            to_email=enrollment.lead.email,
+            subject=subject,
+            body_text=body,
+            body_html=text_to_html(body),
+            status=EmailMessage.Status.QUEUED,
             lead=enrollment.lead,
+            enrollment=enrollment,
+            template=template,
+            sent_by=owner,
+            tracking_token=new_tracking_token(),
         )
+        send_outbound_email.delay(msg.id)
         create_notification(
             user=owner,
-            title=f"Sequence step: {enrollment.sequence.name}",
-            body=f"Send “{subject}” to {enrollment.lead.name}",
+            title=f"Sequence step sent: {enrollment.sequence.name}",
+            body=f"“{subject}” → {enrollment.lead.name} <{enrollment.lead.email}>",
             kind=Notification.Kind.SEQUENCE,
-            link="/leads",
+            link=f"/leads/{enrollment.lead_id}",
         )
-        if owner.email:
-            send_notification_email.delay(
-                f"[Sequence] {subject}",
-                body,
-                [owner.email],
-            )
 
         following = enrollment.sequence.steps.filter(order=next_order + 1).first()
         enrollment.current_step_order = next_order

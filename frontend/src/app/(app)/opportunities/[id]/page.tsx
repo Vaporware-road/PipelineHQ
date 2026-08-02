@@ -2,11 +2,14 @@
 
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { DateTimeFields } from "@/components/DateTimeFields";
+import { DatePicker, DateTimeFields } from "@/components/DateTimeFields";
+import { TimelineFeed } from "@/components/TimelineFeed";
+import { CustomFieldsPanel } from "@/components/CustomFieldsPanel";
+import { AiAssistPanel } from "@/components/AiAssistPanel";
 import { Badge, Button, Card, Empty, Input, Money, PageHeader, Select, Textarea } from "@/components/ui";
 import { api, apiList } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
-import type { CrmTask, DealComment, Opportunity } from "@/lib/types";
+import type { CrmTask, DealComment, Opportunity, OutboundEmail, Product, Quote } from "@/lib/types";
 
 const MEDDIC_FIELDS: { key: keyof Opportunity; label: string; hint: string }[] = [
   { key: "metrics", label: "Metrics", hint: "Quantified economic impact" },
@@ -16,6 +19,12 @@ const MEDDIC_FIELDS: { key: keyof Opportunity; label: string; hint: string }[] =
   { key: "identify_pain", label: "Identify pain", hint: "Required for Proposal+" },
   { key: "champion", label: "Champion", hint: "Required for Proposal+" },
 ];
+
+const HEALTH_TONE: Record<string, "ok" | "warn" | "neutral"> = {
+  healthy: "ok",
+  at_risk: "warn",
+  stalled: "warn",
+};
 
 export default function OpportunityDetailPage() {
   const params = useParams<{ id: string }>();
@@ -28,15 +37,29 @@ export default function OpportunityDetailPage() {
   const [taskForm, setTaskForm] = useState({ title: "", due_at: "" });
   const [closeModal, setCloseModal] = useState<"closed_won" | "closed_lost" | null>(null);
   const [closeReason, setCloseReason] = useState("");
+  const [timelineKey, setTimelineKey] = useState(0);
+  const [emailForm, setEmailForm] = useState({ to_email: "", subject: "", body: "" });
+  const [quotes, setQuotes] = useState<Quote[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [quoteForm, setQuoteForm] = useState({
+    name: "",
+    discount_percent: "0",
+    product_id: "",
+    quantity: "1",
+  });
 
   async function load() {
     try {
-      const [data, dealTasks] = await Promise.all([
+      const [data, dealTasks, dealQuotes, catalog] = await Promise.all([
         api<Opportunity>(`/api/opportunities/${params.id}/`),
         apiList<CrmTask>(`/api/tasks/?opportunity=${params.id}`),
+        apiList<Quote>(`/api/quotes/?opportunity=${params.id}`),
+        apiList<Product>(`/api/products/?is_active=true`),
       ]);
       setOpp(data);
       setTasks(dealTasks);
+      setQuotes(dealQuotes);
+      setProducts(catalog);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load");
     }
@@ -90,6 +113,70 @@ export default function OpportunityDetailPage() {
     }
   }
 
+  async function createQuote(e: React.FormEvent) {
+    e.preventDefault();
+    const product = products.find((p) => String(p.id) === quoteForm.product_id);
+    if (!product || !quoteForm.name.trim()) {
+      setError("Quote name and a product are required.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await api<Quote>("/api/quotes/", {
+        method: "POST",
+        body: JSON.stringify({
+          opportunity: Number(params.id),
+          name: quoteForm.name.trim(),
+          discount_percent: quoteForm.discount_percent || "0",
+          line_items: [
+            {
+              product: product.id,
+              description: product.name,
+              quantity: quoteForm.quantity || "1",
+              unit_price: product.unit_price,
+            },
+          ],
+        }),
+      });
+      setQuoteForm({ name: "", discount_percent: "0", product_id: "", quantity: "1" });
+      setQuotes(await apiList<Quote>(`/api/quotes/?opportunity=${params.id}`));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Quote create failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function quoteAction(quoteId: number, action: "send" | "approve" | "reject" | "accept") {
+    setBusy(true);
+    setError("");
+    try {
+      await api(`/api/quotes/${quoteId}/${action}/`, { method: "POST" });
+      setQuotes(await apiList<Quote>(`/api/quotes/?opportunity=${params.id}`));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Quote action failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openPreview(quoteId: number) {
+    try {
+      const token = localStorage.getItem("pipelinehq_access");
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000"}/api/quotes/${quoteId}/preview/`,
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+      );
+      if (!res.ok) throw new Error("Preview failed");
+      const html = await res.text();
+      const blob = new Blob([html], { type: "text/html" });
+      window.open(URL.createObjectURL(blob), "_blank", "noopener,noreferrer");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Preview failed");
+    }
+  }
+
   async function addActivity(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -104,8 +191,33 @@ export default function OpportunityDetailPage() {
       });
       setActivity({ type: "note", subject: "", body: "" });
       await load();
+      setTimelineKey((k) => k + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Activity failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function sendEmail(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      await api<OutboundEmail>("/api/emails/", {
+        method: "POST",
+        body: JSON.stringify({
+          to_email: emailForm.to_email,
+          subject: emailForm.subject,
+          body: emailForm.body,
+          opportunity: Number(params.id),
+          contact: opp?.primary_contact || null,
+        }),
+      });
+      setEmailForm({ to_email: emailForm.to_email, subject: "", body: "" });
+      setTimelineKey((k) => k + 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Send failed");
     } finally {
       setBusy(false);
     }
@@ -181,7 +293,18 @@ export default function OpportunityDetailPage() {
       <PageHeader
         title={opp.name}
         subtitle={`${opp.account_name} · owned by ${opp.owner.username}`}
-        actions={opp.is_stale ? <Badge tone="warn">Stale deal</Badge> : undefined}
+        actions={
+          <div className="flex flex-wrap gap-2">
+            {opp.health ? (
+              <span title={(opp.health_reasons || []).map((r) => r.detail).join(" · ")}>
+                <Badge tone={HEALTH_TONE[opp.health] || "neutral"}>
+                  {opp.health.replace("_", " ")}
+                </Badge>
+              </span>
+            ) : null}
+            {opp.is_stale ? <Badge tone="warn">Stale deal</Badge> : null}
+          </div>
+        }
       />
       {error ? <p className="mb-3 text-sm text-[var(--danger)]">{error}</p> : null}
 
@@ -224,11 +347,13 @@ export default function OpportunityDetailPage() {
             <option value="best_case">Best Case</option>
             <option value="commit">Commit</option>
           </Select>
-          <label className="block text-xs uppercase tracking-wide text-[var(--muted)]">Close date</label>
-          <Input
-            type="date"
-            defaultValue={opp.close_date}
-            onBlur={(e) => saveField({ close_date: e.target.value })}
+          <DatePicker
+            mode="date"
+            label="Close date"
+            value={opp.close_date || ""}
+            onChange={(close_date) => {
+              if (close_date !== (opp.close_date || "")) saveField({ close_date });
+            }}
           />
           <label className="block text-xs uppercase tracking-wide text-[var(--muted)]">Next step</label>
           <Input
@@ -238,9 +363,26 @@ export default function OpportunityDetailPage() {
           <p className="text-sm text-[var(--muted)]">
             Value: <Money value={opp.amount} />
           </p>
+          <CustomFieldsPanel
+            entity="opportunity"
+            values={opp.custom_fields || {}}
+            disabled={busy}
+            onSave={(patch) => saveField({ custom_fields: { ...(opp.custom_fields || {}), ...patch } })}
+          />
         </Card>
 
         <div className="space-y-4 lg:col-span-2">
+          <AiAssistPanel
+            opportunity={opp}
+            onOpportunityPatch={setOpp}
+            onEmailDraft={(draft) =>
+              setEmailForm({
+                to_email: draft.to_email || emailForm.to_email,
+                subject: draft.subject,
+                body: draft.body,
+              })
+            }
+          />
           <Card>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="font-[family-name:var(--font-display)] text-lg">MEDDIC checklist</h2>
@@ -289,6 +431,114 @@ export default function OpportunityDetailPage() {
                 );
               })}
             </div>
+          </Card>
+
+          <Card>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="font-[family-name:var(--font-display)] text-lg">Quotes</h2>
+              <Badge>{quotes.length}</Badge>
+            </div>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              CPQ-lite — discounts over 20% need Sales Manager approval before send.
+            </p>
+            <div className="mt-3 space-y-3">
+              {quotes.map((quote) => (
+                <div key={quote.id} className="rounded-lg border border-[var(--line)] p-3">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <p className="font-medium">{quote.name}</p>
+                      <p className="text-xs text-[var(--muted)]">
+                        Discount {quote.discount_percent}% · <Money value={quote.total} />
+                      </p>
+                    </div>
+                    <Badge
+                      tone={
+                        quote.status === "accepted" || quote.status === "sent"
+                          ? "ok"
+                          : quote.status === "pending_approval" || quote.status === "rejected"
+                            ? "warn"
+                            : "neutral"
+                      }
+                    >
+                      {quote.status.replace("_", " ")}
+                    </Badge>
+                  </div>
+                  <ul className="mt-2 space-y-1 text-sm text-[var(--muted)]">
+                    {(quote.line_items || []).map((line) => (
+                      <li key={line.id}>
+                        {line.description} × {line.quantity} @ <Money value={line.unit_price} />
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button variant="ghost" disabled={busy} onClick={() => openPreview(quote.id)}>
+                      Preview
+                    </Button>
+                    {quote.status === "draft" ? (
+                      <Button variant="ghost" disabled={busy} onClick={() => quoteAction(quote.id, "send")}>
+                        Mark sent
+                      </Button>
+                    ) : null}
+                    {quote.status === "sent" ? (
+                      <Button variant="ghost" disabled={busy} onClick={() => quoteAction(quote.id, "accept")}>
+                        Mark accepted
+                      </Button>
+                    ) : null}
+                    {quote.status === "pending_approval" ? (
+                      <>
+                        <Button variant="ghost" disabled={busy} onClick={() => quoteAction(quote.id, "approve")}>
+                          Approve
+                        </Button>
+                        <Button variant="ghost" disabled={busy} onClick={() => quoteAction(quote.id, "reject")}>
+                          Reject
+                        </Button>
+                      </>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
+              {quotes.length === 0 ? <Empty>No quotes yet.</Empty> : null}
+            </div>
+            <form className="mt-4 grid gap-2 border-t border-[var(--line)] pt-4 sm:grid-cols-2" onSubmit={createQuote}>
+              <Input
+                className="sm:col-span-2"
+                placeholder="Quote name"
+                value={quoteForm.name}
+                onChange={(e) => setQuoteForm({ ...quoteForm, name: e.target.value })}
+                required
+              />
+              <Select
+                value={quoteForm.product_id}
+                onChange={(e) => setQuoteForm({ ...quoteForm, product_id: e.target.value })}
+                required
+              >
+                <option value="">Product…</option>
+                {products.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} (${p.unit_price})
+                  </option>
+                ))}
+              </Select>
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="Discount %"
+                value={quoteForm.discount_percent}
+                onChange={(e) => setQuoteForm({ ...quoteForm, discount_percent: e.target.value })}
+              />
+              <Input
+                type="number"
+                min="1"
+                step="1"
+                placeholder="Qty"
+                value={quoteForm.quantity}
+                onChange={(e) => setQuoteForm({ ...quoteForm, quantity: e.target.value })}
+              />
+              <Button type="submit" disabled={busy || products.length === 0}>
+                Create quote
+              </Button>
+            </form>
           </Card>
 
           <Card>
@@ -378,6 +628,38 @@ export default function OpportunityDetailPage() {
           </Card>
 
           <Card>
+            <h2 className="font-[family-name:var(--font-display)] text-lg">Send email</h2>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              Delivers via Celery with open/click tracking on the timeline.
+            </p>
+            <form className="mt-3 grid gap-2" onSubmit={sendEmail}>
+              <Input
+                type="email"
+                placeholder="To"
+                value={emailForm.to_email}
+                onChange={(e) => setEmailForm({ ...emailForm, to_email: e.target.value })}
+                required
+              />
+              <Input
+                placeholder="Subject"
+                value={emailForm.subject}
+                onChange={(e) => setEmailForm({ ...emailForm, subject: e.target.value })}
+                required
+              />
+              <Textarea
+                placeholder="Body"
+                rows={4}
+                value={emailForm.body}
+                onChange={(e) => setEmailForm({ ...emailForm, body: e.target.value })}
+                required
+              />
+              <Button type="submit" disabled={busy}>
+                Send email
+              </Button>
+            </form>
+          </Card>
+
+          <Card>
             <h2 className="font-[family-name:var(--font-display)] text-lg">Log activity</h2>
             <form className="mt-3 grid gap-2" onSubmit={addActivity}>
               <Select value={activity.type} onChange={(e) => setActivity({ ...activity, type: e.target.value })}>
@@ -406,20 +688,8 @@ export default function OpportunityDetailPage() {
 
           <Card>
             <h2 className="font-[family-name:var(--font-display)] text-lg">Timeline</h2>
-            <div className="mt-3 space-y-3">
-              {(opp.activities || []).map((a) => (
-                <div key={a.id} className="border-l-2 border-[var(--accent)] pl-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge>{a.type}</Badge>
-                    <span className="font-medium">{a.subject}</span>
-                    <span className="text-xs text-[var(--muted)]">
-                      {formatDateTime(a.created_at)} · {a.created_by.username}
-                    </span>
-                  </div>
-                  {a.body ? <p className="mt-1 text-sm text-[var(--muted)]">{a.body}</p> : null}
-                </div>
-              ))}
-              {(opp.activities || []).length === 0 ? <Empty>No activities yet.</Empty> : null}
+            <div className="mt-3">
+              <TimelineFeed scope={{ opportunity: Number(params.id) }} refreshKey={timelineKey} />
             </div>
           </Card>
         </div>

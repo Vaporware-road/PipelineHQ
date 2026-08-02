@@ -1,27 +1,52 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Card, Empty, PageHeader } from "@/components/ui";
+import { Card, Empty, PageHeader, Select } from "@/components/ui";
 import { apiList } from "@/lib/api";
-import type { Account, Contact } from "@/lib/types";
+import type { Account, Contact, Territory } from "@/lib/types";
 
 export default function AccountsPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
+  const [territories, setTerritories] = useState<Territory[]>([]);
+  const [territory, setTerritory] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
-    Promise.all([apiList<Account>("/api/accounts/"), apiList<Contact>("/api/contacts/")])
+    apiList<Territory>("/api/territories/")
+      .then(setTerritories)
+      .catch(() => setTerritories([]));
+  }, []);
+
+  useEffect(() => {
+    const qs = territory ? `?territory=${territory}` : "";
+    Promise.all([apiList<Account>(`/api/accounts/${qs}`), apiList<Contact>("/api/contacts/")])
       .then(([a, c]) => {
         setAccounts(a);
         setContacts(c);
       })
       .catch((e) => setError(e.message));
-  }, []);
+  }, [territory]);
 
   return (
     <div>
-      <PageHeader title="Accounts & contacts" subtitle="Company records created from lead conversion or manually." />
+      <PageHeader
+        title="Accounts & contacts"
+        subtitle="Company records created from lead conversion or manually."
+        actions={
+          territories.length ? (
+            <Select value={territory} onChange={(e) => setTerritory(e.target.value)}>
+              <option value="">All territories</option>
+              {territories.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </Select>
+          ) : undefined
+        }
+      />
       {error ? <p className="mb-3 text-sm text-[var(--danger)]">{error}</p> : null}
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="overflow-x-auto">
@@ -32,15 +57,21 @@ export default function AccountsPage() {
                 <th>Name</th>
                 <th>Domain</th>
                 <th>Industry</th>
+                <th>Territory</th>
                 <th>Owner</th>
               </tr>
             </thead>
             <tbody>
               {accounts.map((a) => (
                 <tr key={a.id}>
-                  <td>{a.name}</td>
-                  <td>{a.domain}</td>
-                  <td>{a.industry}</td>
+                  <td>
+                    <Link href={`/accounts/${a.id}`} className="text-[var(--cyan)] hover:underline">
+                      {a.name}
+                    </Link>
+                  </td>
+                  <td>{a.domain || "—"}</td>
+                  <td>{a.industry || "—"}</td>
+                  <td>{a.territory_name || "—"}</td>
                   <td>{a.owner.username}</td>
                 </tr>
               ))}
@@ -62,10 +93,18 @@ export default function AccountsPage() {
             <tbody>
               {contacts.map((c) => (
                 <tr key={c.id}>
-                  <td>{c.name}</td>
+                  <td>
+                    <Link href={`/contacts/${c.id}`} className="text-[var(--cyan)] hover:underline">
+                      {c.name}
+                    </Link>
+                  </td>
                   <td>{c.email}</td>
-                  <td>{c.title}</td>
-                  <td>{c.account_name}</td>
+                  <td>{c.title || "—"}</td>
+                  <td>
+                    <Link href={`/accounts/${c.account}`} className="text-[var(--cyan)] hover:underline">
+                      {c.account_name}
+                    </Link>
+                  </td>
                 </tr>
               ))}
             </tbody>

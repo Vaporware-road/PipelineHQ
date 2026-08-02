@@ -9,17 +9,19 @@ This document explains **everything that was built** and **why**, so you can ext
 ```text
 Browser (Next.js)
     │  HTTPS/JSON + JWT Bearer token
+    │  WebSocket (/ws/realtime/?token=…)  ← notifications + JobRun push
     ▼
-Django REST API  ──►  PostgreSQL   (source of truth)
+Django ASGI (Daphne/Channels)  ──►  PostgreSQL   (source of truth)
     │
     ├─► Redis cache   (dashboard KPIs + analytics)
+    ├─► Redis channel layer  (WS fan-out)
     │
-    └─► Redis broker  ──► Celery Worker  (emails, CSV, exports, scans, sequences)
+    └─► Redis broker  ──► Celery Worker  (emails, CSV, exports, scans, sequences, AI optional)
                               ▲
                          Celery Beat (schedules hourly/nightly tasks)
 ```
 
-**Idea:** HTTP requests should be *fast*. Anything slow or “fire-and-forget” goes to Celery.
+**Idea:** HTTP requests should be *fast*. Anything slow or “fire-and-forget” goes to Celery. Live UI updates use Channels when connected, with HTTP polling as fallback.
 
 ---
 
@@ -76,8 +78,14 @@ Classic Salesforce-like objects plus PipelineHQ upgrades:
 | `DealComment` | Notes on a deal; `@username` mentions → notifications |
 | `Task` | Reminders tied to lead/opportunity (also created by sequences) |
 | `Notification` | In-app inbox (assignment, mention, stage, sequence, task due) |
-| `LeadRoutingRule` | Round-robin auto-assign for new leads |
+| `LeadRoutingRule` | Round-robin auto-assign for new leads (optional territory SDRs) |
 | `EmailTemplate` / `Sequence` / `SequenceStep` / `SequenceEnrollment` | Lightweight outbound cadence |
+| `EmailMessage` / `Meeting` / `AvailabilitySlot` | Real outbound email + native booking |
+| `Product` / `Quote` / `QuoteLineItem` | CPQ-lite quotes with discount approval |
+| `Territory` / `CustomFieldDefinition` / `CustomFieldValue` | Regions + EAV custom fields |
+| `AuditEvent` | Append-only manager compliance history |
+| `AiSuggestion` | Cached AI/rules assists (summary, NBA, email draft, score overlay) |
+| `TimelineEvent` | Unified activity feed projection |
 | `JobRun` | Tracks async Celery jobs for the UI |
 
 **Lead conversion** (`LeadConvertSerializer`) runs in a **DB transaction**:
@@ -101,7 +109,11 @@ That atomicity is an important interview talking point.
 Important custom actions:
 
 - `POST /api/leads/{id}/convert/`
+- `POST /api/leads/{id}/ai-score-overlay/` — rule score + optional LLM delta
 - `POST /api/leads/import-csv/` → creates `JobRun` → `import_leads_csv.delay(...)`
+- `POST /api/opportunities/{id}/ai-summary/` / `ai-next-action/` / `ai-email-draft/`
+- `GET /api/ai-suggestions/` — replay cached assists
+- WebSocket `ws/realtime/?token=<JWT>` — live notification + job_update events
 - `GET /api/search/?q=` → role-scoped global search (leads, accounts, contacts, deals)
 - `GET /api/opportunities/pipeline/` → columns for Kanban
 - `GET|POST /api/opportunities/{id}/comments/` → deal comments (+ mention fan-out)
@@ -131,7 +143,7 @@ Important custom actions:
 | `crm.export_analytics_csv` | Reports export | Analytics CSV via Celery |
 | `crm.flag_stale_deals` | Beat hourly + Admin → Operations | Sets `Opportunity.is_stale` |
 | `crm.warm_dashboard_cache` | Beat nightly + Admin → Operations | Precomputes KPI payloads |
-| `crm.advance_sequence_enrollments` | Beat + Admin / Sequences | Creates tasks + notifications for due steps |
+| `crm.advance_sequence_enrollments` | Beat + Admin / Sequences | Creates EmailMessage + Celery send (+ tasks/notifications) |
 | `crm.notify_overdue_tasks` | Beat hourly | Notifies owners of overdue incomplete tasks |
 | `crm.reset_demo_data` | Admin → Operations | Re-runs `seed_demo --reset` |
 
@@ -186,7 +198,7 @@ Central `api()` helper:
 | `/reports` | Funnel + activity + CSV export |
 | `/jobs` | Poll Celery `JobRun` rows |
 | `/profile` | Self-service identity, password, workspace counts |
-| `/admin` | Sales Manager hub: Team / Routing / Operations / Jobs |
+| `/admin` | Sales Manager hub: Team / Routing / Fields / Territories / Audit / Operations / Jobs |
 | `/settings` | Redirects to `/admin` |
 
 `AppShell` is the responsive chrome (mobile menu + desktop nav + **Cmd/Ctrl+K search** + Alerts bell).
@@ -203,7 +215,7 @@ UI Convert button
   → LeadConvertSerializer.save()  [atomic]
   → enqueue_notification.delay(...)
   → JSON { lead, account, contact, opportunity }
-Celery worker prints email to console
+Celery worker delivers email (console backend by default; SMTP/Mailtrap via env)
 ```
 
 ### B) CSV import (async)
@@ -235,7 +247,7 @@ Manager Alerts bell shows unread mention
 Manager Sequences → Advance due steps
   OR Celery Beat
   → advance_sequence_enrollments
-  → Task "Send email: …" + Notification for owner
+  → EmailMessage queued + send_outbound_email (+ Task/Notification for owner)
 ```
 
 ### E) Stale deals
@@ -251,12 +263,15 @@ Celery Beat (hourly) OR Manager "Run stale scan"
 
 ## 6. How to extend (practice projects)
 
-1. **Real email** — swap console backend for SMTP/SendGrid inside the Celery task.  
-2. **WebSockets** — Django Channels to push JobRun / notification completion (no polling).  
-3. **Tests** — pytest for lead conversion transaction + MEDDIC permission matrix.  
-4. **Quote line items** — Opportunity → Quote → LineItem with discount approval.  
-5. **Territories** — assign Accounts to regions; managers filter by territory.  
-6. **Deep-link search hits** — open a lead/account detail route instead of list pages.
+Shipped in the portfolio roadmap: real email + tracking, quotes/scoring/health, territories/custom fields/audit, AI assists, and Channels realtime (with HTTP polling fallback).
+
+Still good stretch goals:
+
+1. **Google Calendar OAuth sync** — upgrade first-party booking links to two-way calendar.  
+2. **pytest matrix** — lead conversion transaction + MEDDIC permission edges.  
+3. **Conversation intelligence** — call notes / recording hooks (Gong-class).  
+4. **True inbound email sync** — Gmail/Outlook reply capture beyond manual timeline logs.  
+5. **Full RBAC permission matrix** — beyond role codes (`SDR` / `AE` / `MANAGER`).
 
 ---
 
@@ -270,6 +285,8 @@ Celery Beat (hourly) OR Manager "Run stale scan"
 - How **MEDDIC gates** encode sales process in the API (not only the UI)  
 - How Redis caching interacts with invalidation on writes  
 - Why JWT on a SPA + CORS configuration is required  
+- How **rules-first AI** stays demoable offline, with optional LLM overlay  
+- Why WebSockets still keep **HTTP polling fallback** for reliability  
 
 ---
 
@@ -285,7 +302,7 @@ python manage.py seed_demo --reset
 python manage.py setup_periodic_tasks
 
 # processes
-python manage.py runserver 8000
+daphne -b 127.0.0.1 -p 8000 config.asgi:application
 celery -A config worker -l info
 celery -A config beat -l info
 npm run dev   # in frontend/

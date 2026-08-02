@@ -1,0 +1,187 @@
+from datetime import timedelta
+from datetime import time
+
+from django.core import mail
+from django.test import override_settings
+from django.urls import reverse
+from django.utils import timezone
+from rest_framework import status
+from rest_framework.test import APITestCase
+
+from apps.accounts.models import User
+from apps.crm.email_tracking import inject_tracking, new_tracking_token, text_to_html
+from apps.crm.models import (
+    Account,
+    AvailabilitySlot,
+    EmailMessage,
+    EmailTemplate,
+    Lead,
+    Meeting,
+    Opportunity,
+    Sequence,
+    SequenceEnrollment,
+    SequenceStep,
+)
+from apps.crm.tasks import advance_sequence_enrollments, send_outbound_email
+
+
+@override_settings(
+    EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+    PUBLIC_BASE_URL="http://testserver",
+    CELERY_TASK_ALWAYS_EAGER=True,
+    CELERY_TASK_EAGER_PROPAGATES=True,
+)
+class Phase2CommsAPITests(APITestCase):
+    def setUp(self):
+        self.ae = User.objects.create_user(
+            username="ae",
+            email="ae@example.com",
+            password="demo1234!",
+            role=User.Role.AE,
+            first_name="Ava",
+            booking_slug="ava-ae",
+        )
+        self.sdr = User.objects.create_user(
+            username="sdr",
+            email="sdr@example.com",
+            password="demo1234!",
+            role=User.Role.SDR,
+            booking_slug="sam-sdr",
+        )
+        self.account = Account.objects.create(name="Acme", domain="acme.test", owner=self.ae)
+        self.opp = Opportunity.objects.create(
+            name="Acme deal",
+            account=self.account,
+            amount="5000.00",
+            stage=Opportunity.Stage.DISCOVERY,
+            owner=self.ae,
+            close_date="2030-01-01",
+        )
+        self.lead = Lead.objects.create(
+            name="Pat Prospect",
+            email="pat@prospect.test",
+            company="ProspectCo",
+            owner=self.sdr,
+        )
+
+    def test_compose_email_queues_and_sends(self):
+        self.client.force_authenticate(self.ae)
+        mail.outbox.clear()
+        res = self.client.post(
+            reverse("email-message-list"),
+            {
+                "to_email": "buyer@acme.test",
+                "subject": "Hello",
+                "body": "See https://example.com/pricing",
+                "opportunity": self.opp.id,
+            },
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        msg = EmailMessage.objects.get(pk=res.data["id"])
+        # Eager Celery should have delivered
+        send_outbound_email(msg.id)
+        msg.refresh_from_db()
+        self.assertEqual(msg.status, EmailMessage.Status.SENT)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("/t/o/", mail.outbox[0].alternatives[0][0])
+        self.assertIn("/t/c/", mail.outbox[0].alternatives[0][0])
+
+    def test_tracking_open_and_click(self):
+        token = new_tracking_token()
+        msg = EmailMessage.objects.create(
+            to_email="buyer@acme.test",
+            subject="Tracked",
+            body_text="hi",
+            body_html=inject_tracking(text_to_html("hi https://example.com"), token),
+            status=EmailMessage.Status.SENT,
+            opportunity=self.opp,
+            sent_by=self.ae,
+            tracking_token=token,
+            sent_at=timezone.now(),
+        )
+        open_res = self.client.get(reverse("track-open", args=[token]))
+        self.assertEqual(open_res.status_code, 200)
+        self.assertEqual(open_res["Content-Type"], "image/gif")
+        msg.refresh_from_db()
+        self.assertEqual(msg.open_count, 1)
+        self.assertIsNotNone(msg.opened_at)
+
+        click_res = self.client.get(reverse("track-click", args=[token]), {"u": "https://example.com"})
+        self.assertEqual(click_res.status_code, 302)
+        msg.refresh_from_db()
+        self.assertEqual(msg.click_count, 1)
+
+    def test_sequence_advance_creates_email_to_lead(self):
+        tmpl = EmailTemplate.objects.create(
+            name="Intro",
+            subject="Hi {{name}}",
+            body="Hello {{company}}",
+            created_by=self.sdr,
+        )
+        seq = Sequence.objects.create(name="Warm", is_active=True, created_by=self.sdr)
+        SequenceStep.objects.create(sequence=seq, order=1, delay_days=0, template=tmpl)
+        SequenceEnrollment.objects.create(
+            sequence=seq,
+            lead=self.lead,
+            status=SequenceEnrollment.Status.ACTIVE,
+            current_step_order=0,
+            next_run_at=timezone.now() - timedelta(minutes=1),
+            enrolled_by=self.sdr,
+        )
+        mail.outbox.clear()
+        result = advance_sequence_enrollments()
+        self.assertEqual(result["advanced"], 1)
+        msg = EmailMessage.objects.get(lead=self.lead)
+        self.assertEqual(msg.to_email, self.lead.email)
+        self.assertEqual(msg.subject, "Hi Pat Prospect")
+        send_outbound_email(msg.id)
+        msg.refresh_from_db()
+        self.assertEqual(msg.status, EmailMessage.Status.SENT)
+
+    def test_public_booking_creates_meeting(self):
+        AvailabilitySlot.objects.create(
+            user=self.ae,
+            weekday=0,
+            start_time=time(10, 0),
+            end_time=time(10, 30),
+        )
+        # Pick next Monday at 10:00
+        now = timezone.localtime()
+        days_ahead = (0 - now.weekday()) % 7
+        if days_ahead == 0 and now.time() >= time(10, 0):
+            days_ahead = 7
+        day = (now + timedelta(days=days_ahead)).date()
+        starts = timezone.make_aware(timezone.datetime.combine(day, time(10, 0)))
+        ends = timezone.make_aware(timezone.datetime.combine(day, time(10, 30)))
+
+        res = self.client.post(
+            reverse("public-book", args=["ava-ae"]),
+            {
+                "invitee_name": "Casey Buyer",
+                "invitee_email": "casey@buyer.test",
+                "starts_at": starts.isoformat(),
+                "ends_at": ends.isoformat(),
+                "opportunity": self.opp.id,
+            },
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.data)
+        self.assertTrue(Meeting.objects.filter(host=self.ae, invitee_email="casey@buyer.test").exists())
+
+    def test_timeline_includes_email(self):
+        EmailMessage.objects.create(
+            to_email="a@b.c",
+            subject="On timeline",
+            body_text="x",
+            status=EmailMessage.Status.SENT,
+            opportunity=self.opp,
+            sent_by=self.ae,
+            tracking_token=new_tracking_token(),
+            sent_at=timezone.now(),
+        )
+        self.client.force_authenticate(self.ae)
+        res = self.client.get(reverse("timeline"), {"opportunity": self.opp.id})
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        titles = [e["title"] for e in res.data["results"]]
+        self.assertTrue(any("On timeline" in t for t in titles))

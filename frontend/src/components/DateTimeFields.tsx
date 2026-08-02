@@ -18,6 +18,14 @@ function pad(n: number) {
   return String(n).padStart(2, "0");
 }
 
+function toDateOnly(year: number, month: number, day: number) {
+  return `${year}-${pad(month)}-${pad(day)}`;
+}
+
+function toDateTime(year: number, month: number, day: number, hour24: number, minute: number) {
+  return `${toDateOnly(year, month, day)}T${pad(hour24)}:${pad(minute)}`;
+}
+
 function parseParts(value: string) {
   const { date, time } = splitDateTime(value);
   // Stable defaults (not `new Date()`) so SSR and client initial state match.
@@ -33,14 +41,20 @@ function parseParts(value: string) {
   };
 }
 
-function toValue(year: number, month: number, day: number, hour24: number, minute: number) {
-  return `${year}-${pad(month)}-${pad(day)}T${pad(hour24)}:${pad(minute)}`;
-}
-
-function formatTrigger(value: string) {
-  if (!value) return "Set due date & time";
+function formatTrigger(value: string, mode: "date" | "datetime", placeholder: string) {
+  if (!value) return placeholder;
+  if (mode === "date") {
+    const dt = new Date(`${value}T12:00:00`);
+    if (Number.isNaN(dt.getTime())) return placeholder;
+    return dt.toLocaleDateString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  }
   const dt = new Date(value);
-  if (Number.isNaN(dt.getTime())) return "Set due date & time";
+  if (Number.isNaN(dt.getTime())) return placeholder;
   return dt.toLocaleString("en-US", {
     weekday: "short",
     month: "short",
@@ -67,18 +81,29 @@ const MONTHS = [
 ];
 
 type ClockMode = "hour" | "minute";
+export type DatePickerMode = "date" | "datetime";
 
-export function DateTimeFields({
+export function DatePicker({
   value,
   onChange,
+  mode = "date",
+  label,
+  placeholder,
   className = "",
+  align = "left",
 }: {
   value: string;
   onChange: (next: string) => void;
-  dateLabel?: string;
-  timeLabel?: string;
+  mode?: DatePickerMode;
+  label?: string;
+  placeholder?: string;
   className?: string;
+  align?: "left" | "right";
 }) {
+  const withTime = mode === "datetime";
+  const emptyLabel =
+    placeholder || (withTime ? "Set date & time" : "Select date");
+
   const [open, setOpen] = useState(false);
   const [viewYear, setViewYear] = useState(() => parseParts(value).year);
   const [viewMonth, setViewMonth] = useState(() => parseParts(value).month);
@@ -97,13 +122,15 @@ export function DateTimeFields({
       setViewMonth(parts.month);
     } else {
       const n = new Date();
-      const next = toValue(
-        n.getFullYear(),
-        n.getMonth() + 1,
-        n.getDate(),
-        n.getHours(),
-        Math.floor(n.getMinutes() / 5) * 5,
-      );
+      const next = withTime
+        ? toDateTime(
+            n.getFullYear(),
+            n.getMonth() + 1,
+            n.getDate(),
+            n.getHours(),
+            Math.floor(n.getMinutes() / 5) * 5,
+          )
+        : toDateOnly(n.getFullYear(), n.getMonth() + 1, n.getDate());
       setDraft(next);
       setViewYear(n.getFullYear());
       setViewMonth(n.getMonth() + 1);
@@ -131,30 +158,32 @@ export function DateTimeFields({
   const hour12 = parts.hour24 % 12 || 12;
   const isPm = parts.hour24 >= 12;
 
-  function commitDraft(next: string) {
+  function emit(year: number, month: number, day: number, hour24 = parts.hour24, minute = parts.minute) {
+    const next = withTime ? toDateTime(year, month, day, hour24, minute) : toDateOnly(year, month, day);
     setDraft(next);
     onChange(next);
   }
 
   function setDay(day: number) {
-    commitDraft(toValue(viewYear, viewMonth, day, parts.hour24, parts.minute));
+    emit(viewYear, viewMonth, day);
+    if (!withTime) setOpen(false);
   }
 
   function setHour12(h12: number) {
     let h24 = h12 % 12;
     if (isPm) h24 += 12;
-    commitDraft(toValue(parts.year, parts.month, parts.day, h24, parts.minute));
+    emit(parts.year, parts.month, parts.day, h24, parts.minute);
     setClockMode("minute");
   }
 
   function setMinute(m: number) {
-    commitDraft(toValue(parts.year, parts.month, parts.day, parts.hour24, m));
+    emit(parts.year, parts.month, parts.day, parts.hour24, m);
   }
 
   function setPeriod(pm: boolean) {
     let h = parts.hour24 % 12;
     if (pm) h += 12;
-    commitDraft(toValue(parts.year, parts.month, parts.day, h, parts.minute));
+    emit(parts.year, parts.month, parts.day, h, parts.minute);
   }
 
   function shiftMonth(delta: number) {
@@ -165,14 +194,17 @@ export function DateTimeFields({
 
   function setToday() {
     const n = new Date();
-    const next = toValue(
-      n.getFullYear(),
-      n.getMonth() + 1,
-      n.getDate(),
-      n.getHours(),
-      Math.floor(n.getMinutes() / 5) * 5,
-    );
-    commitDraft(next);
+    if (withTime) {
+      emit(
+        n.getFullYear(),
+        n.getMonth() + 1,
+        n.getDate(),
+        n.getHours(),
+        Math.floor(n.getMinutes() / 5) * 5,
+      );
+    } else {
+      emit(n.getFullYear(), n.getMonth() + 1, n.getDate());
+    }
     setViewYear(n.getFullYear());
     setViewMonth(n.getMonth() + 1);
   }
@@ -190,22 +222,76 @@ export function DateTimeFields({
 
   const today = new Date();
   const selectedInView =
-    parts.year === viewYear && parts.month === viewMonth ? parts.day : null;
+    parts.hasValue && parts.year === viewYear && parts.month === viewMonth ? parts.day : null;
+
+  const calendarBlock = (
+    <div className={withTime ? "border-b border-[var(--line)] p-3 sm:border-b-0 sm:border-r" : "p-3"}>
+      <div className="mb-2 flex items-center justify-between">
+        <button type="button" className="futuristic-dt-nav" aria-label="Previous month" onClick={() => shiftMonth(-1)}>
+          ‹
+        </button>
+        <p className="font-[family-name:var(--font-display)] text-xs tracking-[0.14em] text-[var(--cyan)]">
+          {MONTHS[viewMonth - 1]} {viewYear}
+        </p>
+        <button type="button" className="futuristic-dt-nav" aria-label="Next month" onClick={() => shiftMonth(1)}>
+          ›
+        </button>
+      </div>
+      <div className="mb-1 grid grid-cols-7 gap-0.5">
+        {WEEKDAYS.map((w) => (
+          <span
+            key={w}
+            className="py-1 text-center text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--muted)]"
+          >
+            {w}
+          </span>
+        ))}
+      </div>
+      <div className="grid grid-cols-7 gap-0.5">
+        {cells.map((cell, i) => {
+          if (!cell.inMonth || cell.day == null) {
+            return <span key={`e-${i}`} className="aspect-square" />;
+          }
+          const isSelected = selectedInView === cell.day;
+          const isToday =
+            today.getFullYear() === viewYear &&
+            today.getMonth() + 1 === viewMonth &&
+            today.getDate() === cell.day;
+          return (
+            <button
+              key={cell.day}
+              type="button"
+              onClick={() => setDay(cell.day)}
+              className={`aspect-square rounded-md text-xs tabular-nums transition ${
+                isSelected
+                  ? "bg-[var(--accent)] text-white shadow-[0_0_14px_rgba(255,43,214,0.45)]"
+                  : isToday
+                    ? "ring-1 ring-[var(--cyan)] text-[var(--cyan)] hover:bg-[rgba(0,229,255,0.1)]"
+                    : "text-[var(--ink)] hover:bg-[rgba(255,43,214,0.12)]"
+              }`}
+            >
+              {cell.day}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 
   return (
     <div ref={rootRef} className={`relative ${className}`}>
       <label className="block text-[11px] font-medium uppercase tracking-[0.12em] text-[var(--muted)]">
-        Due
+        {label ? <span className="mb-0 block">{label}</span> : null}
         <button
           type="button"
           aria-haspopup="dialog"
           aria-expanded={open}
           aria-controls={panelId}
           onClick={() => setOpen((v) => !v)}
-          className="futuristic-dt-trigger mt-1.5 flex w-full min-w-[13.5rem] items-center justify-between gap-3 rounded-md border border-[var(--line)] bg-[var(--input)] px-3 py-2 text-left text-sm text-[var(--ink)] outline-none transition hover:border-[var(--cyan)] focus:border-[var(--cyan)] focus:shadow-[0_0_0_1px_rgba(0,229,255,0.35),0_0_16px_rgba(0,229,255,0.15)]"
+          className={`futuristic-dt-trigger flex w-full min-w-[11.5rem] items-center justify-between gap-3 rounded-md border border-[var(--line)] bg-[var(--input)] px-3 py-2 text-left text-sm text-[var(--ink)] outline-none transition hover:border-[var(--cyan)] focus:border-[var(--cyan)] focus:shadow-[0_0_0_1px_rgba(0,229,255,0.35),0_0_16px_rgba(0,229,255,0.15)] ${label ? "mt-1.5" : ""}`}
         >
           <span className={value ? "tabular-nums tracking-wide" : "text-[var(--muted)]"}>
-            {formatTrigger(value)}
+            {formatTrigger(value, mode, emptyLabel)}
           </span>
           <span className="futuristic-dt-trigger-icon" aria-hidden>
             ◈
@@ -217,8 +303,327 @@ export function DateTimeFields({
         <div
           id={panelId}
           role="dialog"
-          aria-label="Choose due date and time"
-          className="futuristic-dt-panel absolute right-0 z-40 mt-2 w-[min(100vw-2rem,22rem)] origin-top-right overflow-hidden rounded-xl border border-[var(--line)] sm:w-[26.5rem]"
+          aria-label={withTime ? "Choose date and time" : "Choose date"}
+          className={`futuristic-dt-panel absolute z-40 mt-2 origin-top overflow-hidden rounded-xl border border-[var(--line)] ${
+            align === "right" ? "right-0 origin-top-right" : "left-0 origin-top-left"
+          } ${withTime ? "w-[min(100vw-2rem,22rem)] sm:w-[26.5rem]" : "w-[min(100vw-2rem,18.5rem)]"}`}
+        >
+          {withTime ? (
+            <div className="futuristic-dt-header flex items-center justify-between gap-3 px-4 py-3">
+              <div className="flex items-baseline gap-1 font-[family-name:var(--font-display)] text-3xl tracking-[0.08em] text-[var(--ink)]">
+                <button
+                  type="button"
+                  className={`tabular-nums transition ${
+                    clockMode === "hour"
+                      ? "text-[var(--accent)] drop-shadow-[0_0_10px_rgba(255,43,214,0.55)]"
+                      : "text-[var(--muted)] hover:text-[var(--ink)]"
+                  }`}
+                  onClick={() => setClockMode("hour")}
+                >
+                  {pad(hour12)}
+                </button>
+                <span className="futuristic-dt-colon text-[var(--cyan)]">:</span>
+                <button
+                  type="button"
+                  className={`tabular-nums transition ${
+                    clockMode === "minute"
+                      ? "text-[var(--cyan)] drop-shadow-[0_0_10px_rgba(0,229,255,0.55)]"
+                      : "text-[var(--muted)] hover:text-[var(--ink)]"
+                  }`}
+                  onClick={() => setClockMode("minute")}
+                >
+                  {pad(parts.minute)}
+                </button>
+              </div>
+              <div className="flex flex-col gap-1">
+                <button
+                  type="button"
+                  onClick={() => setPeriod(false)}
+                  className={`rounded px-2 py-0.5 text-[10px] font-semibold tracking-[0.16em] transition ${
+                    !isPm
+                      ? "bg-[var(--accent-soft)] text-[var(--accent)] ring-1 ring-[rgba(255,43,214,0.4)]"
+                      : "text-[var(--muted)] hover:text-[var(--ink)]"
+                  }`}
+                >
+                  AM
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPeriod(true)}
+                  className={`rounded px-2 py-0.5 text-[10px] font-semibold tracking-[0.16em] transition ${
+                    isPm
+                      ? "bg-[rgba(0,229,255,0.12)] text-[var(--cyan)] ring-1 ring-[rgba(0,229,255,0.4)]"
+                      : "text-[var(--muted)] hover:text-[var(--ink)]"
+                  }`}
+                >
+                  PM
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="futuristic-dt-header px-4 py-3 text-left">
+              <p className="font-[family-name:var(--font-display)] text-lg tracking-[0.08em] text-[var(--ink)]">
+                {parts.hasValue
+                  ? formatTrigger(toDateOnly(parts.year, parts.month, parts.day), "date", emptyLabel)
+                  : emptyLabel}
+              </p>
+            </div>
+          )}
+
+          <div className={withTime ? "grid gap-0 sm:grid-cols-2" : ""}>
+            {calendarBlock}
+
+            {withTime ? (
+              <div className="flex flex-col items-center justify-center gap-2.5 p-3">
+                <div className="flex w-full items-center justify-between gap-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">
+                    {timeUi === "clock"
+                      ? clockMode === "hour"
+                        ? "Select hour"
+                        : "Select minute"
+                      : "Scroll time"}
+                  </p>
+                  <div className="flex rounded-md border border-[var(--line)] p-0.5">
+                    {(["clock", "wheel"] as const).map((ui) => (
+                      <button
+                        key={ui}
+                        type="button"
+                        onClick={() => setTimeUi(ui)}
+                        className={`rounded px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] transition ${
+                          timeUi === ui
+                            ? "bg-[rgba(0,229,255,0.14)] text-[var(--cyan)]"
+                            : "text-[var(--muted)] hover:text-[var(--ink)]"
+                        }`}
+                      >
+                        {ui}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {timeUi === "clock" ? (
+                  <AnalogClock
+                    mode={clockMode}
+                    hour12={hour12}
+                    minute={parts.minute}
+                    onPickHour={setHour12}
+                    onPickMinute={setMinute}
+                  />
+                ) : (
+                  <TimeWheel
+                    hour12={hour12}
+                    minute={parts.minute}
+                    onPickHour={setHour12}
+                    onPickMinute={setMinute}
+                  />
+                )}
+
+                <div className="flex gap-1.5">
+                  {[0, 15, 30, 45].map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => {
+                        setMinute(m);
+                        setClockMode("minute");
+                      }}
+                      className={`rounded border px-2 py-1 text-[10px] tabular-nums tracking-wide transition ${
+                        parts.minute === m
+                          ? "border-[var(--cyan)] text-[var(--cyan)] shadow-[var(--glow-cyan)]"
+                          : "border-[var(--line)] text-[var(--muted)] hover:border-[var(--cyan)] hover:text-[var(--ink)]"
+                      }`}
+                    >
+                      :{pad(m)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="flex items-center justify-between gap-2 border-t border-[var(--line)] px-3 py-2.5">
+            <button
+              type="button"
+              className="text-xs text-[var(--muted)] transition hover:text-[var(--danger)]"
+              onClick={() => {
+                setDraft("");
+                onChange("");
+                setOpen(false);
+              }}
+            >
+              Clear
+            </button>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="rounded-md border border-[var(--line)] px-2.5 py-1.5 text-xs text-[var(--muted)] transition hover:border-[var(--cyan)] hover:text-[var(--cyan)]"
+                onClick={setToday}
+              >
+                {withTime ? "Now" : "Today"}
+              </button>
+              <button
+                type="button"
+                className="rounded-md bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white shadow-[0_0_16px_rgba(255,43,214,0.35)] transition hover:brightness-110"
+                onClick={() => {
+                  if (draft) onChange(draft);
+                  else if (!value) setToday();
+                  setOpen(false);
+                }}
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Task due picker — calendar + clock. */
+export function DateTimeFields({
+  value,
+  onChange,
+  className = "",
+  dateLabel,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  dateLabel?: string;
+  timeLabel?: string;
+  className?: string;
+}) {
+  return (
+    <DatePicker
+      mode="datetime"
+      label={dateLabel || "Due"}
+      value={value}
+      onChange={onChange}
+      className={className}
+      align="right"
+      placeholder="Set due date & time"
+    />
+  );
+}
+
+function parseTimeValue(value: string): { hour24: number; minute: number } {
+  const [hh = "9", mm = "0"] = (value || "09:00").slice(0, 5).split(":");
+  return { hour24: Number(hh) || 0, minute: Number(mm) || 0 };
+}
+
+function formatTimeValue(hour24: number, minute: number) {
+  return `${pad(hour24)}:${pad(minute)}`;
+}
+
+function formatTimeTrigger(value: string, placeholder: string) {
+  if (!value) return placeholder;
+  const { hour24, minute } = parseTimeValue(value);
+  const hour12 = hour24 % 12 || 12;
+  const suffix = hour24 >= 12 ? "PM" : "AM";
+  return `${hour12}:${pad(minute)} ${suffix}`;
+}
+
+/** Clock-only picker — value is `HH:mm` (24h). */
+export function TimePicker({
+  value,
+  onChange,
+  label,
+  placeholder = "Select time",
+  className = "",
+  align = "left",
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  label?: string;
+  placeholder?: string;
+  className?: string;
+  align?: "left" | "right";
+}) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(value || "09:00");
+  const [clockMode, setClockMode] = useState<ClockMode>("hour");
+  const [timeUi, setTimeUi] = useState<"clock" | "wheel">("clock");
+  const rootRef = useRef<HTMLDivElement>(null);
+  const panelId = useId();
+
+  useEffect(() => {
+    if (!open) return;
+    setDraft(value || "09:00");
+    setClockMode("hour");
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!open) return;
+    function onDoc(e: MouseEvent) {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const { hour24, minute } = parseTimeValue(draft);
+  const hour12 = hour24 % 12 || 12;
+  const isPm = hour24 >= 12;
+
+  function commit(h24: number, m: number) {
+    const next = formatTimeValue(h24, m);
+    setDraft(next);
+    onChange(next);
+  }
+
+  function setHour12(h12: number) {
+    let h24 = h12 % 12;
+    if (isPm) h24 += 12;
+    commit(h24, minute);
+    setClockMode("minute");
+  }
+
+  function setMinute(m: number) {
+    commit(hour24, m);
+  }
+
+  function setPeriod(pm: boolean) {
+    let h = hour24 % 12;
+    if (pm) h += 12;
+    commit(h, minute);
+  }
+
+  return (
+    <div ref={rootRef} className={`relative ${className}`}>
+      <label className="block text-[11px] font-medium uppercase tracking-[0.12em] text-[var(--muted)]">
+        {label ? <span className="mb-0 block">{label}</span> : null}
+        <button
+          type="button"
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          aria-controls={panelId}
+          onClick={() => setOpen((v) => !v)}
+          className={`futuristic-dt-trigger flex w-full min-w-[8.5rem] items-center justify-between gap-3 rounded-md border border-[var(--line)] bg-[var(--input)] px-3 py-2 text-left text-sm text-[var(--ink)] outline-none transition hover:border-[var(--cyan)] focus:border-[var(--cyan)] focus:shadow-[0_0_0_1px_rgba(0,229,255,0.35),0_0_16px_rgba(0,229,255,0.15)] ${label ? "mt-1.5" : ""}`}
+        >
+          <span className={value ? "tabular-nums tracking-wide" : "text-[var(--muted)]"}>
+            {formatTimeTrigger(value, placeholder)}
+          </span>
+          <span className="futuristic-dt-trigger-icon" aria-hidden>
+            ◈
+          </span>
+        </button>
+      </label>
+
+      {open ? (
+        <div
+          id={panelId}
+          role="dialog"
+          aria-label="Choose time"
+          className={`futuristic-dt-panel absolute z-40 mt-2 w-[min(100vw-2rem,16.5rem)] overflow-hidden rounded-xl border border-[var(--line)] ${
+            align === "right" ? "right-0 origin-top-right" : "left-0 origin-top-left"
+          }`}
         >
           <div className="futuristic-dt-header flex items-center justify-between gap-3 px-4 py-3">
             <div className="flex items-baseline gap-1 font-[family-name:var(--font-display)] text-3xl tracking-[0.08em] text-[var(--ink)]">
@@ -243,7 +648,7 @@ export function DateTimeFields({
                 }`}
                 onClick={() => setClockMode("minute")}
               >
-                {pad(parts.minute)}
+                {pad(minute)}
               </button>
             </div>
             <div className="flex flex-col gap-1">
@@ -272,178 +677,92 @@ export function DateTimeFields({
             </div>
           </div>
 
-          <div className="grid gap-0 sm:grid-cols-2">
-            <div className="border-b border-[var(--line)] p-3 sm:border-b-0 sm:border-r">
-              <div className="mb-2 flex items-center justify-between">
-                <button
-                  type="button"
-                  className="futuristic-dt-nav"
-                  aria-label="Previous month"
-                  onClick={() => shiftMonth(-1)}
-                >
-                  ‹
-                </button>
-                <p className="font-[family-name:var(--font-display)] text-xs tracking-[0.14em] text-[var(--cyan)]">
-                  {MONTHS[viewMonth - 1]} {viewYear}
-                </p>
-                <button
-                  type="button"
-                  className="futuristic-dt-nav"
-                  aria-label="Next month"
-                  onClick={() => shiftMonth(1)}
-                >
-                  ›
-                </button>
-              </div>
-              <div className="mb-1 grid grid-cols-7 gap-0.5">
-                {WEEKDAYS.map((w) => (
-                  <span
-                    key={w}
-                    className="py-1 text-center text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--muted)]"
-                  >
-                    {w}
-                  </span>
-                ))}
-              </div>
-              <div className="grid grid-cols-7 gap-0.5">
-                {cells.map((cell, i) => {
-                  if (!cell.inMonth || cell.day == null) {
-                    return <span key={`e-${i}`} className="aspect-square" />;
-                  }
-                  const isSelected = selectedInView === cell.day;
-                  const isToday =
-                    today.getFullYear() === viewYear &&
-                    today.getMonth() + 1 === viewMonth &&
-                    today.getDate() === cell.day;
-                  return (
-                    <button
-                      key={cell.day}
-                      type="button"
-                      onClick={() => setDay(cell.day)}
-                      className={`aspect-square rounded-md text-xs tabular-nums transition ${
-                        isSelected
-                          ? "bg-[var(--accent)] text-white shadow-[0_0_14px_rgba(255,43,214,0.45)]"
-                          : isToday
-                            ? "ring-1 ring-[var(--cyan)] text-[var(--cyan)] hover:bg-[rgba(0,229,255,0.1)]"
-                            : "text-[var(--ink)] hover:bg-[rgba(255,43,214,0.12)]"
-                      }`}
-                    >
-                      {cell.day}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="flex flex-col items-center justify-center gap-2.5 p-3">
-              <div className="flex w-full items-center justify-between gap-2">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">
-                  {timeUi === "clock"
-                    ? clockMode === "hour"
-                      ? "Select hour"
-                      : "Select minute"
-                    : "Scroll time"}
-                </p>
-                <div className="flex rounded-md border border-[var(--line)] p-0.5">
-                  {(["clock", "wheel"] as const).map((mode) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      onClick={() => setTimeUi(mode)}
-                      className={`rounded px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] transition ${
-                        timeUi === mode
-                          ? "bg-[rgba(0,229,255,0.14)] text-[var(--cyan)]"
-                          : "text-[var(--muted)] hover:text-[var(--ink)]"
-                      }`}
-                    >
-                      {mode}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {timeUi === "clock" ? (
-                <AnalogClock
-                  mode={clockMode}
-                  hour12={hour12}
-                  minute={parts.minute}
-                  onPickHour={setHour12}
-                  onPickMinute={setMinute}
-                />
-              ) : (
-                <TimeWheel
-                  hour12={hour12}
-                  minute={parts.minute}
-                  onPickHour={setHour12}
-                  onPickMinute={setMinute}
-                />
-              )}
-
-              <div className="flex gap-1.5">
-                {[0, 15, 30, 45].map((m) => (
+          <div className="flex flex-col items-center justify-center gap-2.5 p-3">
+            <div className="flex w-full items-center justify-between gap-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">
+                {timeUi === "clock"
+                  ? clockMode === "hour"
+                    ? "Select hour"
+                    : "Select minute"
+                  : "Scroll time"}
+              </p>
+              <div className="flex rounded-md border border-[var(--line)] p-0.5">
+                {(["clock", "wheel"] as const).map((ui) => (
                   <button
-                    key={m}
+                    key={ui}
                     type="button"
-                    onClick={() => {
-                      setMinute(m);
-                      setClockMode("minute");
-                    }}
-                    className={`rounded border px-2 py-1 text-[10px] tabular-nums tracking-wide transition ${
-                      parts.minute === m
-                        ? "border-[var(--cyan)] text-[var(--cyan)] shadow-[var(--glow-cyan)]"
-                        : "border-[var(--line)] text-[var(--muted)] hover:border-[var(--cyan)] hover:text-[var(--ink)]"
+                    onClick={() => setTimeUi(ui)}
+                    className={`rounded px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] transition ${
+                      timeUi === ui
+                        ? "bg-[rgba(0,229,255,0.14)] text-[var(--cyan)]"
+                        : "text-[var(--muted)] hover:text-[var(--ink)]"
                     }`}
                   >
-                    :{pad(m)}
+                    {ui}
                   </button>
                 ))}
               </div>
             </div>
+
+            {timeUi === "clock" ? (
+              <AnalogClock
+                mode={clockMode}
+                hour12={hour12}
+                minute={minute}
+                onPickHour={setHour12}
+                onPickMinute={setMinute}
+              />
+            ) : (
+              <TimeWheel
+                hour12={hour12}
+                minute={minute}
+                onPickHour={setHour12}
+                onPickMinute={setMinute}
+              />
+            )}
+
+            <div className="flex gap-1.5">
+              {[0, 15, 30, 45].map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => {
+                    setMinute(m);
+                    setClockMode("minute");
+                  }}
+                  className={`rounded border px-2 py-1 text-[10px] tabular-nums tracking-wide transition ${
+                    minute === m
+                      ? "border-[var(--cyan)] text-[var(--cyan)] shadow-[var(--glow-cyan)]"
+                      : "border-[var(--line)] text-[var(--muted)] hover:border-[var(--cyan)] hover:text-[var(--ink)]"
+                  }`}
+                >
+                  :{pad(m)}
+                </button>
+              ))}
+            </div>
           </div>
 
-          <div className="flex items-center justify-between gap-2 border-t border-[var(--line)] px-3 py-2.5">
+          <div className="flex items-center justify-end gap-2 border-t border-[var(--line)] px-3 py-2.5">
             <button
               type="button"
-              className="text-xs text-[var(--muted)] transition hover:text-[var(--danger)]"
+              className="rounded-md border border-[var(--line)] px-2.5 py-1.5 text-xs text-[var(--muted)] transition hover:border-[var(--cyan)] hover:text-[var(--cyan)]"
               onClick={() => {
-                setDraft("");
-                onChange("");
+                const n = new Date();
+                commit(n.getHours(), Math.floor(n.getMinutes() / 5) * 5);
+              }}
+            >
+              Now
+            </button>
+            <button
+              type="button"
+              className="rounded-md bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white shadow-[0_0_16px_rgba(255,43,214,0.35)] transition hover:brightness-110"
+              onClick={() => {
+                if (draft) onChange(draft);
                 setOpen(false);
               }}
             >
-              Clear
+              Done
             </button>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                className="rounded-md border border-[var(--line)] px-2.5 py-1.5 text-xs text-[var(--muted)] transition hover:border-[var(--cyan)] hover:text-[var(--cyan)]"
-                onClick={setToday}
-              >
-                Now
-              </button>
-              <button
-                type="button"
-                className="rounded-md bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white shadow-[0_0_16px_rgba(255,43,214,0.35)] transition hover:brightness-110"
-                onClick={() => {
-                  if (draft) onChange(draft);
-                  else if (!value) {
-                    const n = new Date();
-                    onChange(
-                      toValue(
-                        n.getFullYear(),
-                        n.getMonth() + 1,
-                        n.getDate(),
-                        n.getHours(),
-                        Math.floor(n.getMinutes() / 5) * 5,
-                      ),
-                    );
-                  }
-                  setOpen(false);
-                }}
-              >
-                Done
-              </button>
-            </div>
           </div>
         </div>
       ) : null}
@@ -531,6 +850,7 @@ function AnalogClock({
   onPickHour: (h: number) => void;
   onPickMinute: (m: number) => void;
 }) {
+  const glowId = useId().replace(/:/g, "");
   const size = 168;
   const cx = size / 2;
   const cy = size / 2;
@@ -582,13 +902,13 @@ function AnalogClock({
       }}
     >
       <defs>
-        <radialGradient id="clockGlow" cx="50%" cy="50%" r="50%">
+        <radialGradient id={glowId} cx="50%" cy="50%" r="50%">
           <stop offset="0%" stopColor="rgba(255,43,214,0.35)" />
           <stop offset="55%" stopColor="rgba(0,229,255,0.08)" />
           <stop offset="100%" stopColor="rgba(11,6,20,0.9)" />
         </radialGradient>
       </defs>
-      <circle cx={cx} cy={cy} r={radius + 8} fill="url(#clockGlow)" />
+      <circle cx={cx} cy={cy} r={radius + 8} fill={`url(#${glowId})`} />
       <circle
         cx={cx}
         cy={cy}
@@ -612,21 +932,14 @@ function AnalogClock({
         const r = (a * Math.PI) / 180;
         const tx = cx + Math.cos(r) * (radius - 22);
         const ty = cy + Math.sin(r) * (radius - 22);
-        const active =
-          mode === "hour" ? n === (hour12 % 12 || 12) : n === minute;
+        const active = mode === "hour" ? n === (hour12 % 12 || 12) : n === minute;
         return (
           <g key={`${mode}-${n}`}>
             <circle
               cx={tx}
               cy={ty}
               r={active ? 14 : 12}
-              fill={
-                active
-                  ? mode === "hour"
-                    ? "var(--accent)"
-                    : "var(--cyan)"
-                  : "transparent"
-              }
+              fill={active ? (mode === "hour" ? "var(--accent)" : "var(--cyan)") : "transparent"}
               className="transition"
             />
             <text
@@ -661,16 +974,9 @@ function AnalogClock({
               : "drop-shadow(0 0 6px rgba(0,229,255,0.8))",
         }}
       />
-      <circle
-        cx={cx}
-        cy={cy}
-        r={5}
-        fill={mode === "hour" ? "var(--accent)" : "var(--cyan)"}
-      />
+      <circle cx={cx} cy={cy} r={5} fill={mode === "hour" ? "var(--accent)" : "var(--cyan)"} />
       <circle cx={handX} cy={handY} r={4} fill="#fff" opacity="0.9" />
-      <title>
-        {mode === "hour" ? `Hour ${selected}` : `Minute ${pad(selected)}`}
-      </title>
+      <title>{mode === "hour" ? `Hour ${selected}` : `Minute ${pad(selected)}`}</title>
     </svg>
   );
 }

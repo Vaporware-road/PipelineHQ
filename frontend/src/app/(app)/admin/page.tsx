@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { AdminAuditPanel, AdminFieldsPanel, AdminTerritoriesPanel } from "@/components/AdminPlatformPanels";
 import { Badge, Button, Card, Empty, Input, PageHeader, Select } from "@/components/ui";
 import { api, apiList } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -10,7 +11,7 @@ import { formatDateTime } from "@/lib/format";
 import { ROLE_LABELS, roleLabel } from "@/lib/roles";
 import type { JobRun, LeadRoutingRule, Role, User } from "@/lib/types";
 
-type Tab = "team" | "routing" | "operations" | "jobs";
+type Tab = "team" | "routing" | "fields" | "territories" | "audit" | "operations" | "jobs";
 
 type UserForm = {
   username: string;
@@ -39,6 +40,9 @@ const EMPTY_FORM: UserForm = {
 const TABS: { id: Tab; label: string }[] = [
   { id: "team", label: "Team" },
   { id: "routing", label: "Routing" },
+  { id: "fields", label: "Fields" },
+  { id: "territories", label: "Territories" },
+  { id: "audit", label: "Audit" },
   { id: "operations", label: "Operations" },
   { id: "jobs", label: "Jobs" },
 ];
@@ -372,6 +376,7 @@ export default function AdminPage() {
                     </div>
                     <p className="mt-1 text-sm text-[var(--muted)]">
                       Source filter: {rule.source || "all sources"}
+                      {rule.territory_name ? ` · territory: ${rule.territory_name}` : ""}
                       {rule.last_assignee
                         ? ` · last assignee: ${rule.last_assignee.username}`
                         : " · no assignments yet"}
@@ -387,6 +392,16 @@ export default function AdminPage() {
           )}
         </Card>
       ) : null}
+
+      {tab === "fields" ? (
+        <AdminFieldsPanel busy={busy} setBusy={setBusy} setError={setError} />
+      ) : null}
+
+      {tab === "territories" ? (
+        <AdminTerritoriesPanel busy={busy} setBusy={setBusy} setError={setError} />
+      ) : null}
+
+      {tab === "audit" ? <AdminAuditPanel setError={setError} /> : null}
 
       {tab === "operations" ? (
         <div className="space-y-4">

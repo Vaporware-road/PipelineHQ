@@ -10,6 +10,7 @@ export type User = {
   title: string;
   phone: string;
   is_active?: boolean;
+  booking_slug?: string | null;
 };
 
 export type MeSummary = {
@@ -25,12 +26,18 @@ export type Lead = {
   email: string;
   company: string;
   title: string;
+  industry: string;
   status: string;
   source: string;
   notes: string;
+  score: number;
+  score_reasons: { factor: string; detail: string; points: number }[];
   owner: User;
   converted_opportunity: number | null;
+  converted_account: number | null;
+  converted_contact: number | null;
   converted_at: string | null;
+  custom_fields?: Record<string, string | number | boolean | null>;
   created_at: string;
 };
 
@@ -55,6 +62,9 @@ export type Opportunity = {
   next_step: string;
   is_stale: boolean;
   is_open?: boolean;
+  stage_entered_at?: string | null;
+  health: "healthy" | "at_risk" | "stalled" | string;
+  health_reasons: { factor: string; detail: string; risk: number }[];
   owner: User;
   activities?: Activity[];
   comments?: DealComment[];
@@ -68,6 +78,7 @@ export type Opportunity = {
   loss_reason: string;
   closed_at: string | null;
   meddic_checklist?: Record<string, boolean>;
+  custom_fields?: Record<string, string | number | boolean | null>;
   created_at: string;
   updated_at: string;
 };
@@ -113,6 +124,9 @@ export type Account = {
   domain: string;
   industry: string;
   owner: User;
+  territory?: number | null;
+  territory_name?: string | null;
+  custom_fields?: Record<string, string | number | boolean | null>;
 };
 
 export type Contact = {
@@ -123,6 +137,7 @@ export type Contact = {
   email: string;
   title: string;
   phone: string;
+  custom_fields?: Record<string, string | number | boolean | null>;
 };
 
 export type JobRun = {
@@ -141,6 +156,8 @@ export type Dashboard = {
   pipeline_amount: string;
   open_deals: number;
   stale_deals: number;
+  at_risk_deals: number;
+  at_risk_amount: string;
   leads_open: number;
   activities_due: number;
   won_amount: string;
@@ -215,8 +232,58 @@ export type LeadRoutingRule = {
   enabled: boolean;
   source: string;
   strategy: string;
+  territory?: number | null;
+  territory_name?: string | null;
   last_assignee: User | null;
   updated_at: string;
+};
+
+export type Territory = {
+  id: number;
+  name: string;
+  region: string;
+  industry: string;
+  is_active: boolean;
+  members: User[];
+  account_count?: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CustomFieldDefinition = {
+  id: number;
+  entity: "lead" | "account" | "contact" | "opportunity";
+  key: string;
+  label: string;
+  field_type: "text" | "number" | "bool" | "select" | "date";
+  options: string[];
+  required: boolean;
+  is_active: boolean;
+};
+
+export type AuditEvent = {
+  id: number;
+  actor: User | null;
+  action: string;
+  entity_type: string;
+  entity_id: number;
+  entity_label: string;
+  changes: Record<string, { from?: unknown; to?: unknown } | unknown>;
+  occurred_at: string;
+};
+
+export type AiSuggestion = {
+  id: number;
+  kind: "summary" | "next_action" | "email_draft" | "score_overlay" | string;
+  opportunity: number | null;
+  lead: number | null;
+  title: string;
+  output_text: string;
+  output_json: Record<string, unknown>;
+  prompt_context: Record<string, unknown>;
+  provider: string;
+  model_name: string;
+  created_at: string;
 };
 
 export type EmailTemplate = {
@@ -258,4 +325,113 @@ export type SequenceEnrollment = {
   next_run_at: string | null;
   last_message: string;
   enrolled_by: User;
+};
+
+export type TimelineEvent = {
+  id: string;
+  source: string;
+  event_type: string;
+  title: string;
+  body: string;
+  occurred_at: string;
+  actor: User | null;
+  href: string;
+  meta: Record<string, unknown>;
+  related?: Record<string, unknown>;
+};
+
+export type OutboundEmail = {
+  id: number;
+  to_email: string;
+  subject: string;
+  body_text: string;
+  body_html: string;
+  status: string;
+  lead: number | null;
+  contact: number | null;
+  opportunity: number | null;
+  enrollment: number | null;
+  template: number | null;
+  sent_by: User | null;
+  tracking_token: string;
+  sent_at: string | null;
+  error: string;
+  opened_at: string | null;
+  open_count: number;
+  clicked_at: string | null;
+  click_count: number;
+  created_at: string;
+};
+
+export type AvailabilitySlot = {
+  id: number;
+  user: number;
+  weekday: number;
+  start_time: string;
+  end_time: string;
+};
+
+export type Meeting = {
+  id: number;
+  host: User;
+  title: string;
+  starts_at: string;
+  ends_at: string;
+  invitee_name: string;
+  invitee_email: string;
+  status: string;
+  lead: number | null;
+  contact: number | null;
+  opportunity: number | null;
+  notes: string;
+  created_at: string;
+};
+
+export type Product = {
+  id: number;
+  name: string;
+  sku: string;
+  description: string;
+  unit_price: string;
+  is_active: boolean;
+};
+
+export type QuoteLineItem = {
+  id: number;
+  quote: number;
+  product: number | null;
+  product_name: string | null;
+  description: string;
+  quantity: string;
+  unit_price: string;
+  line_total: string;
+};
+
+export type Quote = {
+  id: number;
+  opportunity: number;
+  opportunity_name: string;
+  name: string;
+  status: string;
+  discount_percent: string;
+  notes: string;
+  created_by: User;
+  approved_by: User | null;
+  approved_at: string | null;
+  line_items: QuoteLineItem[];
+  subtotal: string;
+  total: string;
+  needs_approval: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DuplicateSuspect = {
+  entity_type: string;
+  id: number;
+  label: string;
+  subtitle: string;
+  href: string;
+  score: number;
+  reasons: string[];
 };

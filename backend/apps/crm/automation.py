@@ -41,13 +41,20 @@ def create_notification(
     kind: str = Notification.Kind.OTHER,
     link: str = "",
 ) -> Notification:
-    return Notification.objects.create(
+    note = Notification.objects.create(
         user=user,
         title=title,
         body=body,
         kind=kind,
         link=link,
     )
+    try:
+        from .realtime import push_notification
+
+        push_notification(note)
+    except Exception:
+        pass
+    return note
 
 
 def notify_comment_mentions(comment: DealComment) -> list[Notification]:
@@ -157,7 +164,12 @@ def assign_lead_via_routing(lead: Lead, *, explicit_owner: bool) -> Lead:
     if rule is None or rule.strategy != LeadRoutingRule.Strategy.ROUND_ROBIN:
         return lead
 
-    sdrs = list(User.objects.filter(role=User.Role.SDR, is_active=True).order_by("id"))
+    sdrs_qs = User.objects.filter(role=User.Role.SDR, is_active=True)
+    if rule.territory_id:
+        territory_sdrs = sdrs_qs.filter(territories=rule.territory_id).order_by("id")
+        sdrs = list(territory_sdrs) or list(sdrs_qs.order_by("id"))
+    else:
+        sdrs = list(sdrs_qs.order_by("id"))
     if not sdrs:
         return lead
 

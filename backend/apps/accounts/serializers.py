@@ -17,6 +17,7 @@ class UserSerializer(serializers.ModelSerializer):
             "title",
             "phone",
             "is_active",
+            "booking_slug",
         )
         read_only_fields = fields
 
@@ -26,7 +27,18 @@ class MeUpdateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ("first_name", "last_name", "email", "title", "phone")
+        fields = ("first_name", "last_name", "email", "title", "phone", "booking_slug")
+
+    def validate_booking_slug(self, value):
+        value = (value or "").strip().lower()
+        if not value:
+            return None
+        qs = User.objects.filter(booking_slug=value)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("This booking slug is already taken.")
+        return value
 
 
 class ChangePasswordSerializer(serializers.Serializer):

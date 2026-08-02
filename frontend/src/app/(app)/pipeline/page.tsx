@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { DatePicker } from "@/components/DateTimeFields";
 import { Badge, Button, Card, Empty, Input, Money, PageHeader, Select } from "@/components/ui";
 import { api, apiList } from "@/lib/api";
 import { roleLabel } from "@/lib/roles";
@@ -19,6 +20,7 @@ type PipelineFilters = {
   close_from: string;
   close_to: string;
   is_stale: string;
+  health: string;
   forecast_category: string;
 };
 
@@ -29,6 +31,7 @@ const EMPTY_FILTERS: PipelineFilters = {
   close_from: "",
   close_to: "",
   is_stale: "",
+  health: "",
   forecast_category: "",
 };
 
@@ -47,6 +50,7 @@ function buildQuery(filters: PipelineFilters): string {
   if (filters.close_from) params.set("close_from", filters.close_from);
   if (filters.close_to) params.set("close_to", filters.close_to);
   if (filters.is_stale) params.set("is_stale", filters.is_stale);
+  if (filters.health) params.set("health", filters.health);
   if (filters.forecast_category) params.set("forecast_category", filters.forecast_category);
   const qs = params.toString();
   return qs ? `?${qs}` : "";
@@ -184,6 +188,12 @@ export default function PipelinePage() {
             <option value="true">Stale only</option>
             <option value="false">Not stale</option>
           </Select>
+          <Select value={filters.health} onChange={(e) => setFilters({ ...filters, health: e.target.value })}>
+            <option value="">Health: any</option>
+            <option value="healthy">Healthy</option>
+            <option value="at_risk">At risk</option>
+            <option value="stalled">Stalled</option>
+          </Select>
           <div className="grid grid-cols-2 gap-2">
             <Input
               type="number"
@@ -198,17 +208,17 @@ export default function PipelinePage() {
               onChange={(e) => setFilters({ ...filters, amount_max: e.target.value })}
             />
           </div>
-          <Input
-            type="date"
+          <DatePicker
+            mode="date"
+            placeholder="Close date from"
             value={filters.close_from}
-            onChange={(e) => setFilters({ ...filters, close_from: e.target.value })}
-            aria-label="Close date from"
+            onChange={(close_from) => setFilters({ ...filters, close_from })}
           />
-          <Input
-            type="date"
+          <DatePicker
+            mode="date"
+            placeholder="Close date to"
             value={filters.close_to}
-            onChange={(e) => setFilters({ ...filters, close_to: e.target.value })}
-            aria-label="Close date to"
+            onChange={(close_to) => setFilters({ ...filters, close_to })}
           />
         </div>
         <div className="mt-3">
@@ -242,6 +252,13 @@ export default function PipelinePage() {
                     <p className="mt-1 text-xs text-[var(--muted)]">{opp.account_name}</p>
                     <div className="mt-2 flex items-center justify-between gap-2">
                       <Money value={opp.amount} />
+                      {opp.health === "stalled" ? (
+                        <Badge tone="warn">stalled</Badge>
+                      ) : opp.health === "at_risk" ? (
+                        <Badge tone="warn">at risk</Badge>
+                      ) : opp.health === "healthy" ? (
+                        <Badge tone="ok">healthy</Badge>
+                      ) : null}
                       {opp.is_stale ? <Badge tone="warn">stale</Badge> : null}
                     </div>
                     <label className="mt-2 block text-[10px] uppercase tracking-wide text-[var(--muted)]">

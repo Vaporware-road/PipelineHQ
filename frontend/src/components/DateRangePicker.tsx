@@ -1,6 +1,7 @@
 "use client";
 
-import { Button, Input } from "@/components/ui";
+import { DatePicker } from "@/components/DateTimeFields";
+import { Button } from "@/components/ui";
 import { rangeForPreset, type DateRange, type RangePreset } from "@/lib/dateRange";
 
 const PRESETS: { id: Exclude<RangePreset, "custom">; label: string }[] = [
@@ -27,24 +28,23 @@ export function DateRangePicker({
           {p.label}
         </Button>
       ))}
-      <label className="text-[11px] font-medium uppercase tracking-[0.12em] text-[var(--muted)]">
-        From
-        <Input
-          type="date"
-          className="datetime-field mt-1.5 w-40"
-          value={value.from}
-          onChange={(e) => onChange({ ...value, from: e.target.value, preset: "custom" })}
-        />
-      </label>
-      <label className="text-[11px] font-medium uppercase tracking-[0.12em] text-[var(--muted)]">
-        To
-        <Input
-          type="date"
-          className="datetime-field mt-1.5 w-40"
-          value={value.to}
-          onChange={(e) => onChange({ ...value, to: e.target.value, preset: "custom" })}
-        />
-      </label>
+      <DatePicker
+        mode="date"
+        label="From"
+        placeholder="Start date"
+        value={value.from}
+        onChange={(from) => onChange({ ...value, from, preset: "custom" })}
+        className="w-44"
+      />
+      <DatePicker
+        mode="date"
+        label="To"
+        placeholder="End date"
+        value={value.to}
+        onChange={(to) => onChange({ ...value, to, preset: "custom" })}
+        className="w-44"
+        align="right"
+      />
     </div>
   );
 }

@@ -2,11 +2,14 @@ amqp==5.3.1
 asgiref==3.12.1
 billiard==4.2.4
 celery==5.6.3
+channels==4.2.2
+channels-redis==4.2.1
 click==8.4.2
 click-didyoumean==0.3.1
 click-plugins==1.1.1.2
 click-repl==0.3.0
 cron-descriptor==1.4.5
+daphne==4.1.2
 Django==5.2.16
 django-celery-beat==2.9.0
 django-cors-headers==4.9.0
@@ -17,6 +20,7 @@ djangorestframework==3.17.1
 djangorestframework_simplejwt==5.5.1
 gunicorn==26.0.0
 kombu==5.6.2
+msgpack==1.1.0
 packaging==26.2
 prompt_toolkit==3.0.53
 psycopg==3.3.4
@@ -25,6 +29,8 @@ PyJWT==2.13.0
 python-crontab==3.3.0
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.2
+# redis-py 8 sets socket_timeout=5 by default; CHANNEL_LAYERS must pass
+# socket_timeout=None (see config/settings.py) or idle WebSockets die every ~5s.
 redis==8.1.0
 six==1.17.0
 sqlparse==0.5.5

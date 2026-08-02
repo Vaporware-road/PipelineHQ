@@ -75,9 +75,10 @@ export default function DashboardPage() {
         <Empty>Loading metrics…</Empty>
       ) : (
         <>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <Stat label="Open pipeline" value={<Money value={snap.pipeline_amount} />} />
             <Stat label="Open deals" value={snap.open_deals} />
+            <Stat label="At-risk $" value={<Money value={snap.at_risk_amount ?? "0"} />} warn={(snap.at_risk_deals ?? 0) > 0} />
             <Stat label="Stale deals" value={snap.stale_deals} warn={snap.stale_deals > 0} />
             <Stat label="Won (all time)" value={<Money value={snap.won_amount} />} />
           </div>

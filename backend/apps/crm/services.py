@@ -48,6 +48,14 @@ def build_dashboard_payload(*, user: User | None, role: str) -> dict:
         total=Sum("amount"),
         count=Count("id"),
         stale=Count("id", filter=Q(is_stale=True)),
+        at_risk=Count(
+            "id",
+            filter=Q(health__in=[Opportunity.Health.AT_RISK, Opportunity.Health.STALLED]),
+        ),
+        at_risk_amount=Sum(
+            "amount",
+            filter=Q(health__in=[Opportunity.Health.AT_RISK, Opportunity.Health.STALLED]),
+        ),
     )
     by_stage = list(
         opps.filter(stage__in=OPEN_STAGES)
@@ -60,6 +68,8 @@ def build_dashboard_payload(*, user: User | None, role: str) -> dict:
         "pipeline_amount": str(pipeline["total"] or Decimal("0")),
         "open_deals": pipeline["count"] or 0,
         "stale_deals": pipeline["stale"] or 0,
+        "at_risk_deals": pipeline["at_risk"] or 0,
+        "at_risk_amount": str(pipeline["at_risk_amount"] or Decimal("0")),
         "leads_open": leads.exclude(status=Lead.Status.CONVERTED).count(),
         "activities_due": activities.filter(completed=False, due_at__isnull=False).count(),
         "won_amount": str(

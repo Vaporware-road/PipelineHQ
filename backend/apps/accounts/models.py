@@ -11,6 +11,7 @@ class User(AbstractUser):
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.AE)
     title = models.CharField(max_length=120, blank=True)
     phone = models.CharField(max_length=40, blank=True)
+    booking_slug = models.SlugField(max_length=64, blank=True, unique=True, null=True)
 
     def __str__(self) -> str:
         return f"{self.username} ({self.role})"

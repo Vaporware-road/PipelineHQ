@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { api, apiList } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
+import { useRealtime, type RealtimeMessage } from "@/lib/realtime";
 import type { NotificationItem } from "@/lib/types";
 
 export function NotificationBell() {
@@ -24,11 +25,26 @@ export function NotificationBell() {
     }
   }, []);
 
+  const { connected } = useRealtime(
+    useCallback((msg: RealtimeMessage) => {
+      if (msg.event !== "notification") return;
+      const n = msg.payload as unknown as NotificationItem;
+      if (!n?.id) return;
+      setItems((prev) => {
+        if (prev.some((x) => x.id === n.id)) return prev;
+        return [n, ...prev].slice(0, 8);
+      });
+      if (!n.is_read) setCount((c) => c + 1);
+    }, []),
+  );
+
   useEffect(() => {
     refresh();
-    const id = window.setInterval(refresh, 20_000);
+    // Slow poll when live; faster fallback when WS is down.
+    const ms = connected ? 60_000 : 20_000;
+    const id = window.setInterval(refresh, ms);
     return () => window.clearInterval(id);
-  }, [refresh]);
+  }, [refresh, connected]);
 
   async function markAllRead() {
     const unreadIds = items.filter((n) => !n.is_read).map((n) => n.id);
@@ -66,7 +82,12 @@ export function NotificationBell() {
       {open ? (
         <div className="absolute right-0 z-30 mt-2 w-80 overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--surface)] shadow-[0_0_0_1px_rgba(0,229,255,0.08),0_0_36px_rgba(255,43,214,0.2)] sm:w-96">
           <div className="mb-0 flex items-center justify-between border-b border-[var(--line)] bg-[var(--input)] px-3 py-2.5">
-            <p className="font-[family-name:var(--font-display)] text-sm tracking-[0.06em]">Notifications</p>
+            <p className="font-[family-name:var(--font-display)] text-sm tracking-[0.06em]">
+              Notifications
+              <span className="ml-2 text-[10px] uppercase tracking-wide text-[var(--muted)]">
+                {connected ? "live" : "polling"}
+              </span>
+            </p>
             <button
               type="button"
               className="text-xs uppercase tracking-[0.1em] text-[var(--cyan)] transition hover:text-[var(--accent)]"

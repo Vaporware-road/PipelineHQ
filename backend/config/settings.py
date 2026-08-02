@@ -8,6 +8,7 @@ Learning notes:
 """
 
 from datetime import timedelta
+from decimal import Decimal
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -22,6 +23,7 @@ DEBUG = os.getenv("DJANGO_DEBUG", "1") == "1"
 ALLOWED_HOSTS = [h.strip() for h in os.getenv("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if h.strip()]
 
 INSTALLED_APPS = [
+    "daphne",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -29,6 +31,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     # Third party
+    "channels",
     "rest_framework",
     "rest_framework_simplejwt",
     "corsheaders",
@@ -69,6 +72,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "config.wsgi.application"
+ASGI_APPLICATION = "config.asgi.application"
 
 USE_SQLITE = os.getenv("USE_SQLITE", "0") == "1"
 if USE_SQLITE:
@@ -149,11 +153,29 @@ CORS_ALLOW_CREDENTIALS = True
 # Cache + Celery (Redis)
 # ---------------------------------------------------------------------------
 REDIS_URL = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0")
+CHANNEL_LAYER_URL = os.getenv("CHANNEL_LAYER_URL", "redis://127.0.0.1:6379/1")
 
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",
         "LOCATION": REDIS_URL,
+    }
+}
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            # redis-py 8 defaults socket_timeout=5s, which aborts channels_redis
+            # blocking BZPOPMIN waits and tears down idle WebSockets every ~5s.
+            "hosts": [
+                {
+                    "address": CHANNEL_LAYER_URL,
+                    "socket_timeout": None,
+                    "socket_connect_timeout": 5,
+                }
+            ],
+        },
     }
 }
 
@@ -168,14 +190,28 @@ CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 60 * 5
 
+# AI assists (optional — rules always work offline)
+AI_PROVIDER = os.getenv("AI_PROVIDER", "none")  # none | openai | openai_compatible
+AI_API_KEY = os.getenv("AI_API_KEY", "")
+AI_MODEL = os.getenv("AI_MODEL", "gpt-4o-mini")
+AI_BASE_URL = os.getenv("AI_BASE_URL", "https://api.openai.com/v1")
+
 # Dev-friendly email: printed to console (Celery worker stdout)
 EMAIL_BACKEND = os.getenv(
     "EMAIL_BACKEND",
     "django.core.mail.backends.console.EmailBackend",
 )
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "PipelineHQ <noreply@pipelinehq.local>")
+EMAIL_HOST = os.getenv("EMAIL_HOST", "")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "1") == "1"
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://127.0.0.1:8000")
 
 # Stale deal threshold (days without activity)
 STALE_DEAL_DAYS = int(os.getenv("STALE_DEAL_DAYS", "14"))
+# CPQ-lite: discount % above this requires Sales Manager approval
+QUOTE_DISCOUNT_APPROVAL_PCT = Decimal(os.getenv("QUOTE_DISCOUNT_APPROVAL_PCT", "20"))
 DASHBOARD_CACHE_TTL = int(os.getenv("DASHBOARD_CACHE_TTL", "60"))
 ANALYTICS_CACHE_TTL = int(os.getenv("ANALYTICS_CACHE_TTL", "60"))

@@ -6,8 +6,8 @@ cd "$ROOT"
 
 source .venv/bin/activate
 
-echo "Starting Django on :8000"
-(cd backend && python manage.py runserver 8000) &
+echo "Starting Django ASGI (Daphne) on :8000"
+(cd backend && daphne -b 0.0.0.0 -p 8000 config.asgi:application) &
 DJANGO_PID=$!
 
 echo "Starting Celery worker"

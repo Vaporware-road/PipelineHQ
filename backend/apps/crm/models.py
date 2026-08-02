@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.db import models
 from django.utils import timezone
+from decimal import Decimal
 
 
 class TimeStampedModel(models.Model):
@@ -30,9 +31,12 @@ class Lead(TimeStampedModel):
     email = models.EmailField()
     company = models.CharField(max_length=200)
     title = models.CharField(max_length=120, blank=True)
+    industry = models.CharField(max_length=120, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.NEW)
     source = models.CharField(max_length=20, choices=Source.choices, default=Source.WEBSITE)
     notes = models.TextField(blank=True)
+    score = models.PositiveSmallIntegerField(default=0)
+    score_reasons = models.JSONField(default=list, blank=True)
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -77,6 +81,13 @@ class Account(TimeStampedModel):
         on_delete=models.PROTECT,
         related_name="accounts",
     )
+    territory = models.ForeignKey(
+        "Territory",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="accounts",
+    )
 
     class Meta:
         ordering = ["name"]
@@ -113,6 +124,11 @@ class Opportunity(TimeStampedModel):
         BEST_CASE = "best_case", "Best Case"
         COMMIT = "commit", "Commit"
 
+    class Health(models.TextChoices):
+        HEALTHY = "healthy", "Healthy"
+        AT_RISK = "at_risk", "At risk"
+        STALLED = "stalled", "Stalled"
+
     name = models.CharField(max_length=200)
     account = models.ForeignKey(Account, on_delete=models.CASCADE, related_name="opportunities")
     primary_contact = models.ForeignKey(
@@ -132,6 +148,9 @@ class Opportunity(TimeStampedModel):
     )
     next_step = models.CharField(max_length=255, blank=True)
     is_stale = models.BooleanField(default=False)
+    stage_entered_at = models.DateTimeField(null=True, blank=True)
+    health = models.CharField(max_length=20, choices=Health.choices, default=Health.HEALTHY)
+    health_reasons = models.JSONField(default=list, blank=True)
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -250,6 +269,82 @@ class Task(TimeStampedModel):
         return self.title
 
 
+class TimelineEvent(TimeStampedModel):
+    class EntityType(models.TextChoices):
+        LEAD = "lead", "Lead"
+        ACCOUNT = "account", "Account"
+        CONTACT = "contact", "Contact"
+        OPPORTUNITY = "opportunity", "Opportunity"
+
+    class EventType(models.TextChoices):
+        STAGE_CHANGE = "stage_change", "Stage change"
+        STATUS_CHANGE = "status_change", "Status change"
+        CREATED = "created", "Created"
+        MERGED = "merged", "Merged"
+        NOTE = "note", "Note"
+        EMAIL_SENT = "email_sent", "Email sent"
+        EMAIL_OPEN = "email_open", "Email open"
+        EMAIL_CLICK = "email_click", "Email click"
+        MEETING = "meeting", "Meeting"
+        OTHER = "other", "Other"
+
+    entity_type = models.CharField(max_length=20, choices=EntityType.choices)
+    entity_id = models.PositiveIntegerField()
+    event_type = models.CharField(max_length=30, choices=EventType.choices, default=EventType.OTHER)
+    title = models.CharField(max_length=255)
+    body = models.TextField(blank=True)
+    meta = models.JSONField(blank=True, default=dict)
+    occurred_at = models.DateTimeField(default=timezone.now)
+    account = models.ForeignKey(
+        "Account",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="timeline_events",
+    )
+    contact = models.ForeignKey(
+        "Contact",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="timeline_events",
+    )
+    lead = models.ForeignKey(
+        "Lead",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="timeline_events",
+    )
+    opportunity = models.ForeignKey(
+        "Opportunity",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="timeline_events",
+    )
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="timeline_events",
+    )
+
+    class Meta:
+        ordering = ["-occurred_at", "-id"]
+        indexes = [
+            models.Index(fields=["entity_type", "entity_id", "-occurred_at"]),
+            models.Index(fields=["account", "-occurred_at"]),
+            models.Index(fields=["contact", "-occurred_at"]),
+            models.Index(fields=["lead", "-occurred_at"]),
+            models.Index(fields=["opportunity", "-occurred_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.event_type}: {self.title}"
+
+
 class Notification(TimeStampedModel):
     class Kind(models.TextChoices):
         ASSIGNMENT = "assignment", "Assignment"
@@ -257,6 +352,10 @@ class Notification(TimeStampedModel):
         TASK_DUE = "task_due", "Task Due"
         SEQUENCE = "sequence", "Sequence"
         STAGE = "stage", "Stage"
+        EMAIL = "email", "Email"
+        EMAIL_OPEN = "email_open", "Email open"
+        EMAIL_CLICK = "email_click", "Email click"
+        MEETING = "meeting", "Meeting"
         OTHER = "other", "Other"
 
     user = models.ForeignKey(
@@ -278,7 +377,7 @@ class Notification(TimeStampedModel):
 
 
 class LeadRoutingRule(TimeStampedModel):
-    """Auto-assign new leads to SDRs (round-robin), optionally filtered by source."""
+    """Auto-assign new leads to SDRs (round-robin), optionally filtered by source/territory."""
 
     class Strategy(models.TextChoices):
         ROUND_ROBIN = "round_robin", "Round robin"
@@ -295,6 +394,14 @@ class LeadRoutingRule(TimeStampedModel):
         max_length=20,
         choices=Strategy.choices,
         default=Strategy.ROUND_ROBIN,
+    )
+    territory = models.ForeignKey(
+        "Territory",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="routing_rules",
+        help_text="When set, round-robin only among SDRs in this territory",
     )
     last_assignee = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -386,6 +493,408 @@ class SequenceEnrollment(TimeStampedModel):
 
     def __str__(self) -> str:
         return f"{self.lead_id} in {self.sequence_id} ({self.status})"
+
+
+class EmailMessage(TimeStampedModel):
+    class Status(models.TextChoices):
+        QUEUED = "queued", "Queued"
+        SENT = "sent", "Sent"
+        FAILED = "failed", "Failed"
+
+    to_email = models.EmailField()
+    subject = models.CharField(max_length=255)
+    body_text = models.TextField(blank=True)
+    body_html = models.TextField(blank=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.QUEUED)
+    lead = models.ForeignKey(
+        Lead,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="email_messages",
+    )
+    contact = models.ForeignKey(
+        Contact,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="email_messages",
+    )
+    opportunity = models.ForeignKey(
+        Opportunity,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="email_messages",
+    )
+    enrollment = models.ForeignKey(
+        SequenceEnrollment,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="email_messages",
+    )
+    template = models.ForeignKey(
+        EmailTemplate,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="email_messages",
+    )
+    sent_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="sent_emails",
+    )
+    tracking_token = models.CharField(max_length=64, unique=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    error = models.TextField(blank=True)
+    opened_at = models.DateTimeField(null=True, blank=True)
+    open_count = models.PositiveIntegerField(default=0)
+    clicked_at = models.DateTimeField(null=True, blank=True)
+    click_count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"{self.subject} → {self.to_email} ({self.status})"
+
+
+class AvailabilitySlot(TimeStampedModel):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="availability_slots",
+    )
+    weekday = models.PositiveSmallIntegerField(help_text="0=Monday … 6=Sunday")
+    start_time = models.TimeField()
+    end_time = models.TimeField()
+
+    class Meta:
+        ordering = ["user_id", "weekday", "start_time"]
+        unique_together = [("user", "weekday", "start_time", "end_time")]
+
+    def __str__(self) -> str:
+        return f"{self.user_id} wd{self.weekday} {self.start_time}-{self.end_time}"
+
+
+class Meeting(TimeStampedModel):
+    class Status(models.TextChoices):
+        SCHEDULED = "scheduled", "Scheduled"
+        CANCELLED = "cancelled", "Cancelled"
+        COMPLETED = "completed", "Completed"
+
+    host = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="hosted_meetings",
+    )
+    title = models.CharField(max_length=255, default="Meeting")
+    starts_at = models.DateTimeField()
+    ends_at = models.DateTimeField()
+    invitee_name = models.CharField(max_length=200)
+    invitee_email = models.EmailField()
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.SCHEDULED)
+    lead = models.ForeignKey(
+        Lead,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="meetings",
+    )
+    contact = models.ForeignKey(
+        Contact,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="meetings",
+    )
+    opportunity = models.ForeignKey(
+        Opportunity,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="meetings",
+    )
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["starts_at"]
+
+    def __str__(self) -> str:
+        return f"{self.title} @ {self.starts_at}"
+
+
+class Product(TimeStampedModel):
+    name = models.CharField(max_length=200)
+    sku = models.CharField(max_length=64, blank=True)
+    description = models.TextField(blank=True)
+    unit_price = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class Quote(TimeStampedModel):
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        PENDING_APPROVAL = "pending_approval", "Pending approval"
+        SENT = "sent", "Sent"
+        ACCEPTED = "accepted", "Accepted"
+        REJECTED = "rejected", "Rejected"
+
+    opportunity = models.ForeignKey(Opportunity, on_delete=models.CASCADE, related_name="quotes")
+    name = models.CharField(max_length=200)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
+    discount_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    notes = models.TextField(blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="quotes_created",
+    )
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="quotes_approved",
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.status})"
+
+    @property
+    def subtotal(self):
+        total = Decimal("0")
+        for line in self.line_items.all():
+            total += line.line_total
+        return total
+
+    @property
+    def total(self):
+        discount = self.discount_percent or Decimal("0")
+        factor = (Decimal("100") - discount) / Decimal("100")
+        return (self.subtotal * factor).quantize(Decimal("0.01"))
+
+    @property
+    def needs_approval(self) -> bool:
+        threshold = Decimal(str(getattr(settings, "QUOTE_DISCOUNT_APPROVAL_PCT", 20)))
+        return (self.discount_percent or Decimal("0")) > threshold
+
+
+class QuoteLineItem(TimeStampedModel):
+    quote = models.ForeignKey(Quote, on_delete=models.CASCADE, related_name="line_items")
+    product = models.ForeignKey(
+        Product,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="quote_lines",
+    )
+    description = models.CharField(max_length=255)
+    quantity = models.DecimalField(max_digits=10, decimal_places=2, default=1)
+    unit_price = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+
+    class Meta:
+        ordering = ["id"]
+
+    def __str__(self) -> str:
+        return self.description
+
+    @property
+    def line_total(self):
+        return (self.quantity * self.unit_price).quantize(Decimal("0.01"))
+
+class Territory(TimeStampedModel):
+    """Sales region or industry slice — users and accounts can belong to one."""
+
+    name = models.CharField(max_length=120)
+    region = models.CharField(max_length=120, blank=True)
+    industry = models.CharField(
+        max_length=120,
+        blank=True,
+        help_text="Optional industry match hint for routing/assignment",
+    )
+    is_active = models.BooleanField(default=True)
+    members = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name="territories",
+    )
+
+    class Meta:
+        ordering = ["name"]
+        verbose_name_plural = "territories"
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class CustomFieldDefinition(TimeStampedModel):
+    """EAV field schema — managers define fields per CRM entity."""
+
+    class Entity(models.TextChoices):
+        LEAD = "lead", "Lead"
+        ACCOUNT = "account", "Account"
+        CONTACT = "contact", "Contact"
+        OPPORTUNITY = "opportunity", "Opportunity"
+
+    class FieldType(models.TextChoices):
+        TEXT = "text", "Text"
+        NUMBER = "number", "Number"
+        BOOL = "bool", "Boolean"
+        SELECT = "select", "Select"
+        DATE = "date", "Date"
+
+    entity = models.CharField(max_length=20, choices=Entity.choices)
+    key = models.SlugField(max_length=64)
+    label = models.CharField(max_length=120)
+    field_type = models.CharField(max_length=20, choices=FieldType.choices, default=FieldType.TEXT)
+    options = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Select options as a list of strings",
+    )
+    required = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["entity", "label"]
+        unique_together = [("entity", "key")]
+
+    def __str__(self) -> str:
+        return f"{self.entity}.{self.key}"
+
+
+class CustomFieldValue(TimeStampedModel):
+    """Stored value for a CustomFieldDefinition on one entity instance."""
+
+    definition = models.ForeignKey(
+        CustomFieldDefinition,
+        on_delete=models.CASCADE,
+        related_name="values",
+    )
+    entity_type = models.CharField(max_length=20, choices=CustomFieldDefinition.Entity.choices)
+    entity_id = models.PositiveIntegerField()
+    value_text = models.TextField(blank=True)
+    value_number = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
+    value_bool = models.BooleanField(null=True, blank=True)
+    value_date = models.DateField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["definition__label"]
+        unique_together = [("definition", "entity_type", "entity_id")]
+        indexes = [
+            models.Index(fields=["entity_type", "entity_id"]),
+            models.Index(fields=["definition", "value_text"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.definition_id}@{self.entity_type}:{self.entity_id}"
+
+
+class AuditEvent(models.Model):
+    """Append-only change history for manager compliance views."""
+
+    class Action(models.TextChoices):
+        CREATE = "create", "Create"
+        UPDATE = "update", "Update"
+        DELETE = "delete", "Delete"
+        STAGE = "stage", "Stage change"
+        OWNER = "owner", "Owner change"
+        STATUS = "status", "Status change"
+
+    class EntityType(models.TextChoices):
+        LEAD = "lead", "Lead"
+        ACCOUNT = "account", "Account"
+        CONTACT = "contact", "Contact"
+        OPPORTUNITY = "opportunity", "Opportunity"
+
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="audit_events",
+    )
+    action = models.CharField(max_length=20, choices=Action.choices)
+    entity_type = models.CharField(max_length=20, choices=EntityType.choices)
+    entity_id = models.PositiveIntegerField()
+    entity_label = models.CharField(max_length=255, blank=True)
+    changes = models.JSONField(default=dict, blank=True)
+    occurred_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        ordering = ["-occurred_at", "-id"]
+        indexes = [
+            models.Index(fields=["entity_type", "entity_id", "-occurred_at"]),
+            models.Index(fields=["actor", "-occurred_at"]),
+            models.Index(fields=["action", "-occurred_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.action} {self.entity_type}:{self.entity_id}"
+
+
+class AiSuggestion(TimeStampedModel):
+    """Cached AI / rules assist output for demo replay without live LLM calls."""
+
+    class Kind(models.TextChoices):
+        SUMMARY = "summary", "Deal summary"
+        NEXT_ACTION = "next_action", "Next-best action"
+        EMAIL_DRAFT = "email_draft", "Email draft"
+        SCORE_OVERLAY = "score_overlay", "Lead score overlay"
+
+    kind = models.CharField(max_length=20, choices=Kind.choices)
+    opportunity = models.ForeignKey(
+        Opportunity,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="ai_suggestions",
+    )
+    lead = models.ForeignKey(
+        Lead,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="ai_suggestions",
+    )
+    title = models.CharField(max_length=255, blank=True)
+    output_text = models.TextField(blank=True)
+    output_json = models.JSONField(default=dict, blank=True)
+    prompt_context = models.JSONField(default=dict, blank=True)
+    provider = models.CharField(max_length=40, default="rules")
+    model_name = models.CharField(max_length=80, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="ai_suggestions",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["opportunity", "kind", "-created_at"]),
+            models.Index(fields=["lead", "kind", "-created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.kind} ({self.provider})"
 
 
 class JobRun(TimeStampedModel):

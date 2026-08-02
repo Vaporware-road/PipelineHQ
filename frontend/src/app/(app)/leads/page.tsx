@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { DatePicker } from "@/components/DateTimeFields";
 import { Badge, Button, Card, Empty, Input, PageHeader, Select } from "@/components/ui";
 import { api, apiList } from "@/lib/api";
 import { roleLabel } from "@/lib/roles";
@@ -32,6 +33,7 @@ function buildQuery(filters: LeadFilters): string {
   if (filters.created_from) params.set("created_from", filters.created_from);
   if (filters.created_to) params.set("created_to", filters.created_to);
   if (filters.q.trim()) params.set("search", filters.q.trim());
+  params.set("ordering", "-score");
   const qs = params.toString();
   return qs ? `?${qs}` : "";
 }
@@ -178,17 +180,17 @@ export default function LeadsPage() {
               </option>
             ))}
           </Select>
-          <Input
-            type="date"
+          <DatePicker
+            mode="date"
+            placeholder="Created from"
             value={filters.created_from}
-            onChange={(e) => setFilters({ ...filters, created_from: e.target.value })}
-            aria-label="Created from"
+            onChange={(created_from) => setFilters({ ...filters, created_from })}
           />
-          <Input
-            type="date"
+          <DatePicker
+            mode="date"
+            placeholder="Created to"
             value={filters.created_to}
-            onChange={(e) => setFilters({ ...filters, created_to: e.target.value })}
-            aria-label="Created to"
+            onChange={(created_to) => setFilters({ ...filters, created_to })}
           />
           <Input
             placeholder="Search name/email/company"
@@ -242,6 +244,7 @@ export default function LeadsPage() {
             <tr>
               <th>Name</th>
               <th>Company</th>
+              <th>Score</th>
               <th>Status</th>
               <th>Source</th>
               <th>Owner</th>
@@ -256,6 +259,16 @@ export default function LeadsPage() {
                   <div className="text-xs text-[var(--muted)]">{lead.email}</div>
                 </td>
                 <td>{lead.company}</td>
+                <td>
+                  <span
+                    className="font-medium tabular-nums"
+                    title={(lead.score_reasons || [])
+                      .map((r) => `${r.factor}: +${r.points} (${r.detail})`)
+                      .join("\n")}
+                  >
+                    {lead.score ?? 0}
+                  </span>
+                </td>
                 <td>
                   <Badge tone={lead.status === "converted" ? "ok" : "neutral"}>{lead.status}</Badge>
                 </td>
