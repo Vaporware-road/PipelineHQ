@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { DateTimeFields } from "@/components/DateTimeFields";
 import { Badge, Button, Card, Empty, Input, Money, PageHeader, Select, Textarea } from "@/components/ui";
 import { api, apiList } from "@/lib/api";
+import { formatDateTime } from "@/lib/format";
 import type { CrmTask, DealComment, Opportunity } from "@/lib/types";
 
 const MEDDIC_FIELDS: { key: keyof Opportunity; label: string; hint: string }[] = [
@@ -309,7 +310,7 @@ export default function OpportunityDetailPage() {
                         {task.title}
                       </p>
                       <p className="text-xs text-[var(--muted)]">
-                        {task.due_at ? `Due ${new Date(task.due_at).toLocaleString()}` : "No due date"}
+                        {task.due_at ? `Due ${formatDateTime(task.due_at)}` : "No due date"}
                         {overdue ? " · overdue" : ""}
                       </p>
                     </div>
@@ -355,7 +356,7 @@ export default function OpportunityDetailPage() {
                 <div key={c.id} className="rounded-lg border border-[var(--line)] p-3">
                   <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--muted)]">
                     <span className="font-medium text-[var(--ink)]">{c.author.username}</span>
-                    <span>{new Date(c.created_at).toLocaleString()}</span>
+                    <span>{formatDateTime(c.created_at)}</span>
                   </div>
                   <p className="mt-1 whitespace-pre-wrap text-sm">{c.body}</p>
                 </div>
@@ -412,7 +413,7 @@ export default function OpportunityDetailPage() {
                     <Badge>{a.type}</Badge>
                     <span className="font-medium">{a.subject}</span>
                     <span className="text-xs text-[var(--muted)]">
-                      {new Date(a.created_at).toLocaleString()} · {a.created_by.username}
+                      {formatDateTime(a.created_at)} · {a.created_by.username}
                     </span>
                   </div>
                   {a.body ? <p className="mt-1 text-sm text-[var(--muted)]">{a.body}</p> : null}

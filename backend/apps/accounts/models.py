@@ -4,11 +4,13 @@ from django.db import models
 
 class User(AbstractUser):
     class Role(models.TextChoices):
-        SDR = "SDR", "SDR"
+        SDR = "SDR", "Sales Development"
         AE = "AE", "Account Executive"
         MANAGER = "MANAGER", "Sales Manager"
 
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.AE)
+    title = models.CharField(max_length=120, blank=True)
+    phone = models.CharField(max_length=40, blank=True)
 
     def __str__(self) -> str:
         return f"{self.username} ({self.role})"

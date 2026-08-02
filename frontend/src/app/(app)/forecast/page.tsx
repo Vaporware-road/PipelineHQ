@@ -32,19 +32,6 @@ export default function ForecastPage() {
     }
   }
 
-  async function runOps(action: string) {
-    setBusy(true);
-    setError("");
-    try {
-      const j = await api<JobRun>(`/api/ops/${action}/`, { method: "POST" });
-      setJob(j);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Ops action failed");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <div>
       <PageHeader
@@ -52,20 +39,9 @@ export default function ForecastPage() {
         subtitle="Commit / best case / pipeline rollups. Managers can export via Celery."
         actions={
           user?.role === "MANAGER" ? (
-            <>
-              <Button disabled={busy} onClick={exportCsv}>
-                Export CSV
-              </Button>
-              <Button variant="ghost" disabled={busy} onClick={() => runOps("stale-scan")}>
-                Run stale scan
-              </Button>
-              <Button variant="ghost" disabled={busy} onClick={() => runOps("warm-cache")}>
-                Warm cache
-              </Button>
-              <Button variant="ghost" disabled={busy} onClick={() => runOps("reset-demo")}>
-                Reset demo
-              </Button>
-            </>
+            <Button disabled={busy} onClick={exportCsv}>
+              {busy ? "Exporting…" : "Export CSV"}
+            </Button>
           ) : undefined
         }
       />

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Badge, Button, Card, Empty, Input, PageHeader, Select } from "@/components/ui";
 import { api, apiList } from "@/lib/api";
+import { roleLabel } from "@/lib/roles";
 import type { Lead, User } from "@/lib/types";
 
 type LeadFilters = {
@@ -132,7 +133,7 @@ export default function LeadsPage() {
     <div>
       <PageHeader
         title="Leads"
-        subtitle="SDR workspace — create, qualify, convert. CSV import runs on Celery."
+        subtitle="Sales Development workspace — create, qualify, convert. CSV import runs on Celery."
       />
       {error ? <p className="mb-3 text-sm text-[var(--danger)]">{error}</p> : null}
 
@@ -173,7 +174,7 @@ export default function LeadsPage() {
             <option value="">All owners</option>
             {team.map((u) => (
               <option key={u.id} value={u.id}>
-                {u.username} ({u.role})
+                {u.username} ({roleLabel(u.role)})
               </option>
             ))}
           </Select>

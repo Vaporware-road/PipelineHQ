@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Badge, Button, Card, Empty, Input, Money, PageHeader, Select } from "@/components/ui";
 import { api, apiList } from "@/lib/api";
+import { roleLabel } from "@/lib/roles";
 import type { Opportunity, User } from "@/lib/types";
 
 type PipelineResponse = {
@@ -165,7 +166,7 @@ export default function PipelinePage() {
             <option value="">All owners</option>
             {team.map((u) => (
               <option key={u.id} value={u.id}>
-                {u.username} ({u.role})
+                {u.username} ({roleLabel(u.role)})
               </option>
             ))}
           </Select>

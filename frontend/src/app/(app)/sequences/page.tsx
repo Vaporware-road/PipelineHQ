@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Badge, Button, Card, Empty, Input, PageHeader, Select, Textarea } from "@/components/ui";
 import { api, apiList } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { formatDateTime } from "@/lib/format";
 import type { EmailTemplate, JobRun, Lead, Sequence, SequenceEnrollment } from "@/lib/types";
 
 export default function SequencesPage() {
@@ -138,7 +139,7 @@ export default function SequencesPage() {
         actions={
           user?.role === "MANAGER" ? (
             <Button disabled={busy} onClick={advanceNow}>
-              Advance due steps
+              {busy ? "Advancing…" : "Advance due steps"}
             </Button>
           ) : undefined
         }
@@ -315,7 +316,7 @@ export default function SequencesPage() {
                       <Badge tone={en.status === "active" ? "ok" : "neutral"}>{en.status}</Badge>
                     </td>
                     <td>{en.current_step_order}</td>
-                    <td>{en.next_run_at ? new Date(en.next_run_at).toLocaleString() : "—"}</td>
+                    <td>{en.next_run_at ? formatDateTime(en.next_run_at) : "—"}</td>
                     <td className="text-[var(--muted)]">{en.last_message}</td>
                   </tr>
                 ))}
