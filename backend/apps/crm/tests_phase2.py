@@ -33,6 +33,14 @@ from apps.crm.tasks import advance_sequence_enrollments, send_outbound_email
 )
 class Phase2CommsAPITests(APITestCase):
     def setUp(self):
+        self.manager = User.objects.create_user(
+            username="manager",
+            email="manager@example.com",
+            password="demo1234!",
+            role=User.Role.MANAGER,
+            first_name="Morgan",
+            booking_slug="morgan-mgr",
+        )
         self.ae = User.objects.create_user(
             username="ae",
             email="ae@example.com",
@@ -141,7 +149,7 @@ class Phase2CommsAPITests(APITestCase):
 
     def test_public_booking_creates_meeting(self):
         AvailabilitySlot.objects.create(
-            user=self.ae,
+            user=self.manager,
             weekday=0,
             start_time=time(10, 0),
             end_time=time(10, 30),
@@ -156,7 +164,7 @@ class Phase2CommsAPITests(APITestCase):
         ends = timezone.make_aware(timezone.datetime.combine(day, time(10, 30)))
 
         res = self.client.post(
-            reverse("public-book", args=["ava-ae"]),
+            reverse("public-book", args=["morgan-mgr"]),
             {
                 "invitee_name": "Casey Buyer",
                 "invitee_email": "casey@buyer.test",
@@ -167,7 +175,49 @@ class Phase2CommsAPITests(APITestCase):
             format="json",
         )
         self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.data)
-        self.assertTrue(Meeting.objects.filter(host=self.ae, invitee_email="casey@buyer.test").exists())
+        self.assertTrue(Meeting.objects.filter(host=self.manager, invitee_email="casey@buyer.test").exists())
+
+    def test_only_manager_can_create_meetings(self):
+        starts = timezone.now() + timedelta(days=1)
+        ends = starts + timedelta(minutes=30)
+        payload = {
+            "title": "Sync",
+            "invitee_name": "Buyer",
+            "invitee_email": "buyer@test.com",
+            "starts_at": starts.isoformat(),
+            "ends_at": ends.isoformat(),
+            "target_role": "SDR",
+            "job_detail": "Qualify",
+        }
+        self.client.force_authenticate(self.sdr)
+        denied = self.client.post(reverse("meeting-list"), payload, format="json")
+        self.assertEqual(denied.status_code, status.HTTP_403_FORBIDDEN)
+
+        self.client.force_authenticate(self.manager)
+        ok = self.client.post(reverse("meeting-list"), payload, format="json")
+        self.assertEqual(ok.status_code, status.HTTP_201_CREATED, ok.data)
+        meeting_id = ok.data["id"]
+
+        patch = self.client.patch(
+            reverse("meeting-detail", args=[meeting_id]),
+            {"job_detail": "Qualify + discovery notes"},
+            format="json",
+        )
+        self.assertEqual(patch.status_code, status.HTTP_200_OK, patch.data)
+        self.assertEqual(patch.data["job_detail"], "Qualify + discovery notes")
+        self.assertEqual(Meeting.objects.get(pk=meeting_id).job_detail, "Qualify + discovery notes")
+
+        self.client.force_authenticate(self.sdr)
+        visible = self.client.get(reverse("meeting-list"))
+        self.assertEqual(visible.status_code, status.HTTP_200_OK)
+        ids = [m["id"] for m in visible.data["results"]]
+        self.assertIn(meeting_id, ids)
+
+        self.client.force_authenticate(self.ae)
+        hidden = self.client.get(reverse("meeting-list"))
+        self.assertEqual(hidden.status_code, status.HTTP_200_OK)
+        ae_ids = [m["id"] for m in hidden.data["results"]]
+        self.assertNotIn(meeting_id, ae_ids)
 
     def test_timeline_includes_email(self):
         EmailMessage.objects.create(

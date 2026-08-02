@@ -5,14 +5,21 @@ from __future__ import annotations
 import re
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework import serializers
 
 from apps.accounts.models import User
 
-from .models import DealComment, Lead, LeadRoutingRule, Notification, Opportunity
+from .models import Comment, Lead, LeadRoutingRule, Notification, Opportunity
 
-MENTION_RE = re.compile(r"@([a-zA-Z0-9_]+)")
+USER_MENTION_RE = re.compile(r"@@([a-zA-Z0-9_]+)")
+ROLE_MENTION_RE = re.compile(r"(?<!@)@([A-Za-z]+)")
+ROLE_ALIASES = {
+    "sdr": User.Role.SDR,
+    "ae": User.Role.AE,
+    "manager": User.Role.MANAGER,
+}
 
 # Fields required to *enter* (or be at) a given stage.
 MEDDIC_REQUIRED_FOR_STAGE: dict[str, list[str]] = {
@@ -57,30 +64,66 @@ def create_notification(
     return note
 
 
-def notify_comment_mentions(comment: DealComment) -> list[Notification]:
-    """Create mention notifications for @username tokens in a deal comment."""
-    usernames = {m.group(1) for m in MENTION_RE.finditer(comment.body or "")}
-    if not usernames:
-        return []
-    from django.db.models import Q
+def notify_mentions_in_body(
+    *,
+    body: str,
+    actor: User,
+    link: str,
+    entity_label: str = "a comment",
+) -> list[Notification]:
+    """
+    Fan-out notifications for mention tokens:
+    - @@username → that user
+    - @ROLE (SDR|AE|MANAGER) → all active users with that role
+    """
+    text = body or ""
+    recipient_ids: set[int] = set()
 
-    q = Q()
-    for name in usernames:
-        q |= Q(username__iexact=name)
-    mentioned = User.objects.filter(q).exclude(pk=comment.author_id)
-    link = f"/opportunities/{comment.opportunity_id}"
+    usernames = {m.group(1) for m in USER_MENTION_RE.finditer(text)}
+    if usernames:
+        q = Q()
+        for name in usernames:
+            q |= Q(username__iexact=name)
+        for user in User.objects.filter(q, is_active=True).exclude(pk=actor.pk):
+            recipient_ids.add(user.pk)
+
+    for m in ROLE_MENTION_RE.finditer(text):
+        role = ROLE_ALIASES.get(m.group(1).lower())
+        if not role:
+            continue
+        for user in User.objects.filter(role=role, is_active=True).exclude(pk=actor.pk):
+            recipient_ids.add(user.pk)
+
     created: list[Notification] = []
-    for user in mentioned:
+    for user in User.objects.filter(pk__in=recipient_ids):
         created.append(
             create_notification(
                 user=user,
-                title=f"{comment.author.username} mentioned you",
-                body=comment.body[:280],
+                title=f"{actor.username} mentioned you on {entity_label}",
+                body=text[:280],
                 kind=Notification.Kind.MENTION,
                 link=link,
             )
         )
     return created
+
+
+def notify_comment_mentions(comment: Comment) -> list[Notification]:
+    label = "a comment"
+    if comment.opportunity_id:
+        label = "a deal"
+    elif comment.lead_id:
+        label = "a lead"
+    elif comment.task_id:
+        label = "a task"
+    elif comment.meeting_id:
+        label = "a meeting"
+    return notify_mentions_in_body(
+        body=comment.body,
+        actor=comment.author,
+        link=comment.mention_link(),
+        entity_label=label,
+    )
 
 
 def missing_meddic_fields(opportunity: Opportunity, stage: str) -> list[str]:
@@ -98,7 +141,6 @@ def validate_stage_transition(opportunity: Opportunity, new_stage: str, attrs: d
     if new_stage == opportunity.stage:
         return
 
-    # Apply pending field updates onto a shallow view for gate checks.
     for field in (
         "metrics",
         "economic_buyer",
@@ -192,7 +234,7 @@ def assign_lead_via_routing(lead: Lead, *, explicit_owner: bool) -> Lead:
         title="New lead assigned",
         body=f"{lead.name} @ {lead.company} was routed to you ({lead.source}).",
         kind=Notification.Kind.ASSIGNMENT,
-        link="/leads",
+        link=f"/leads/{lead.id}",
     )
     return lead
 

@@ -1,5 +1,8 @@
+import re
 from datetime import timedelta
 
+from django.core.validators import validate_email
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
@@ -16,9 +19,9 @@ from .models import (
     AuditEvent,
     AvailabilitySlot,
     AiSuggestion,
+    Comment,
     Contact,
     CustomFieldDefinition,
-    DealComment,
     EmailMessage,
     EmailTemplate,
     JobRun,
@@ -279,22 +282,52 @@ class ActivitySerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
 
-class DealCommentSerializer(serializers.ModelSerializer):
+class CommentSerializer(serializers.ModelSerializer):
     author = UserSerializer(read_only=True)
+    replies = serializers.SerializerMethodField()
 
     class Meta:
-        model = DealComment
-        fields = ("id", "opportunity", "author", "body", "created_at", "updated_at")
-        read_only_fields = ("opportunity", "author", "created_at", "updated_at")
+        model = Comment
+        fields = (
+            "id",
+            "author",
+            "body",
+            "parent",
+            "opportunity",
+            "lead",
+            "task",
+            "meeting",
+            "replies",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = (
+            "author",
+            "opportunity",
+            "lead",
+            "task",
+            "meeting",
+            "created_at",
+            "updated_at",
+        )
+
+    def get_replies(self, obj):
+        if self.context.get("skip_replies"):
+            return []
+        qs = obj.replies.select_related("author").order_by("created_at")
+        return CommentSerializer(qs, many=True, context={**self.context, "skip_replies": True}).data
 
     def create(self, validated_data):
-        comment = DealComment.objects.create(
-            opportunity=validated_data["opportunity"],
+        comment = Comment.objects.create(
             author=self.context["request"].user,
-            body=validated_data["body"],
+            **validated_data,
         )
         notify_comment_mentions(comment)
         return comment
+
+
+# Back-compat alias
+DealCommentSerializer = CommentSerializer
 
 
 class OpportunitySerializer(CustomFieldsSerializerMixin, serializers.ModelSerializer):
@@ -308,7 +341,7 @@ class OpportunitySerializer(CustomFieldsSerializerMixin, serializers.ModelSerial
     )
     account_name = serializers.CharField(source="account.name", read_only=True)
     activities = ActivitySerializer(many=True, read_only=True)
-    comments = DealCommentSerializer(many=True, read_only=True)
+    comments = serializers.SerializerMethodField()
     is_open = serializers.BooleanField(read_only=True)
     meddic_checklist = serializers.SerializerMethodField()
 
@@ -356,6 +389,10 @@ class OpportunitySerializer(CustomFieldsSerializerMixin, serializers.ModelSerial
             "created_at",
             "updated_at",
         )
+
+    def get_comments(self, obj):
+        qs = obj.comments.filter(parent__isnull=True).select_related("author").prefetch_related("replies__author")
+        return CommentSerializer(qs, many=True, context=self.context).data
 
     def get_meddic_checklist(self, obj):
         return obj.meddic_checklist()
@@ -409,6 +446,8 @@ class LeadSerializer(CustomFieldsSerializerMixin, serializers.ModelSerializer):
             "industry",
             "status",
             "source",
+            "priority",
+            "budget_amount",
             "notes",
             "score",
             "score_reasons",
@@ -431,6 +470,11 @@ class LeadSerializer(CustomFieldsSerializerMixin, serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
+
+    def validate_budget_amount(self, value):
+        if value is not None and value < 1000:
+            raise serializers.ValidationError("Budget must be at least $1,000.")
+        return value
 
     def create(self, validated_data):
         validated_data.setdefault("owner", self.context["request"].user)
@@ -567,8 +611,11 @@ class TaskSerializer(serializers.ModelSerializer):
         write_only=True,
         required=False,
     )
+    created_by = UserSerializer(read_only=True)
     lead_name = serializers.CharField(source="lead.name", read_only=True, default=None)
     opportunity_name = serializers.CharField(source="opportunity.name", read_only=True, default=None)
+    children = serializers.SerializerMethodField()
+    comment_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Task
@@ -579,26 +626,53 @@ class TaskSerializer(serializers.ModelSerializer):
             "due_at",
             "completed",
             "completed_at",
+            "status",
+            "priority",
             "owner",
             "owner_id",
+            "created_by",
+            "parent",
             "lead",
             "lead_name",
             "opportunity",
             "opportunity_name",
+            "children",
+            "comment_count",
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("completed_at", "created_at", "updated_at")
+        read_only_fields = ("completed_at", "created_by", "created_at", "updated_at")
+
+    def get_children(self, obj):
+        if self.context.get("skip_children"):
+            return []
+        qs = obj.children.select_related("owner", "created_by", "lead", "opportunity").order_by("due_at", "id")
+        return TaskSerializer(qs, many=True, context={**self.context, "skip_children": True}).data
+
+    def get_comment_count(self, obj):
+        return obj.comments.count()
 
     def create(self, validated_data):
-        validated_data.setdefault("owner", self.context["request"].user)
+        request = self.context["request"]
+        validated_data.setdefault("owner", request.user)
+        validated_data["created_by"] = request.user
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
         completed = validated_data.get("completed", instance.completed)
-        if completed and not instance.completed:
-            validated_data["completed_at"] = timezone.now()
-        elif not completed:
+        status_val = validated_data.get("status", instance.status)
+        if completed and status_val != Task.Status.DONE:
+            validated_data["status"] = Task.Status.DONE
+        if validated_data.get("status", status_val) == Task.Status.DONE:
+            validated_data["completed"] = True
+            if not instance.completed_at:
+                validated_data["completed_at"] = timezone.now()
+        elif "completed" in validated_data and not completed:
+            validated_data["completed_at"] = None
+            if status_val == Task.Status.DONE:
+                validated_data["status"] = Task.Status.TODO
+        elif "status" in validated_data and status_val != Task.Status.DONE:
+            validated_data["completed"] = False
             validated_data["completed_at"] = None
         return super().update(instance, validated_data)
 
@@ -669,8 +743,8 @@ class EmailTemplateSerializer(serializers.ModelSerializer):
 
 
 class SequenceStepSerializer(serializers.ModelSerializer):
-    template_name = serializers.CharField(source="template.name", read_only=True)
-    template_subject = serializers.CharField(source="template.subject", read_only=True)
+    template_name = serializers.CharField(source="template.name", read_only=True, default=None)
+    template_subject = serializers.CharField(source="template.subject", read_only=True, default=None)
 
     class Meta:
         model = SequenceStep
@@ -679,6 +753,7 @@ class SequenceStepSerializer(serializers.ModelSerializer):
             "sequence",
             "order",
             "delay_days",
+            "step_type",
             "template",
             "template_name",
             "template_subject",
@@ -692,16 +767,19 @@ class SequenceSerializer(serializers.ModelSerializer):
     created_by = UserSerializer(read_only=True)
     steps = SequenceStepSerializer(many=True, read_only=True)
     step_count = serializers.SerializerMethodField()
+    enrollment_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Sequence
         fields = (
             "id",
             "name",
+            "description",
             "is_active",
             "created_by",
             "steps",
             "step_count",
+            "enrollment_count",
             "created_at",
             "updated_at",
         )
@@ -709,6 +787,9 @@ class SequenceSerializer(serializers.ModelSerializer):
 
     def get_step_count(self, obj):
         return obj.steps.count()
+
+    def get_enrollment_count(self, obj):
+        return obj.enrollments.count()
 
     def create(self, validated_data):
         validated_data["created_by"] = self.context["request"].user
@@ -720,6 +801,7 @@ class SequenceEnrollmentSerializer(serializers.ModelSerializer):
     lead_name = serializers.CharField(source="lead.name", read_only=True)
     lead_company = serializers.CharField(source="lead.company", read_only=True)
     enrolled_by = UserSerializer(read_only=True)
+    recent_messages = serializers.SerializerMethodField()
 
     class Meta:
         model = SequenceEnrollment
@@ -735,6 +817,9 @@ class SequenceEnrollmentSerializer(serializers.ModelSerializer):
             "next_run_at",
             "enrolled_by",
             "last_message",
+            "cancelled_at",
+            "cancel_reason",
+            "recent_messages",
             "created_at",
             "updated_at",
         )
@@ -744,9 +829,26 @@ class SequenceEnrollmentSerializer(serializers.ModelSerializer):
             "next_run_at",
             "enrolled_by",
             "last_message",
+            "cancelled_at",
             "created_at",
             "updated_at",
         )
+
+    def get_recent_messages(self, obj):
+        msgs = obj.email_messages.order_by("-created_at")[:5]
+        return [
+            {
+                "id": m.id,
+                "subject": m.subject,
+                "status": m.status,
+                "open_count": m.open_count,
+                "click_count": m.click_count,
+                "opened_at": m.opened_at,
+                "clicked_at": m.clicked_at,
+                "sent_at": m.sent_at,
+            }
+            for m in msgs
+        ]
 
     def validate(self, attrs):
         sequence = attrs.get("sequence") or getattr(self.instance, "sequence", None)
@@ -755,19 +857,32 @@ class SequenceEnrollmentSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"sequence": "Sequence is not active."})
         if sequence and not sequence.steps.exists():
             raise serializers.ValidationError({"sequence": "Sequence has no steps."})
-        if (
-            self.instance is None
-            and sequence
-            and lead
-            and SequenceEnrollment.objects.filter(sequence=sequence, lead=lead).exists()
-        ):
-            raise serializers.ValidationError("Lead is already enrolled in this sequence.")
+        if self.instance is None and sequence and lead:
+            existing = SequenceEnrollment.objects.filter(sequence=sequence, lead=lead).first()
+            if existing and existing.status == SequenceEnrollment.Status.ACTIVE:
+                raise serializers.ValidationError("Lead is already enrolled in this sequence.")
+            if existing and existing.status in {
+                SequenceEnrollment.Status.CANCELLED,
+                SequenceEnrollment.Status.COMPLETED,
+            }:
+                self.context["reenrollment"] = existing
         return attrs
 
     def create(self, validated_data):
         sequence = validated_data["sequence"]
         first_step = sequence.steps.order_by("order").first()
         delay = first_step.delay_days if first_step else 0
+        existing = self.context.get("reenrollment")
+        if existing:
+            existing.status = SequenceEnrollment.Status.ACTIVE
+            existing.current_step_order = 0
+            existing.next_run_at = timezone.now() + timedelta(days=delay)
+            existing.last_message = "Re-enrolled — waiting for first step"
+            existing.cancelled_at = None
+            existing.cancel_reason = ""
+            existing.enrolled_by = self.context["request"].user
+            existing.save()
+            return existing
         validated_data["enrolled_by"] = self.context["request"].user
         validated_data["status"] = SequenceEnrollment.Status.ACTIVE
         validated_data["current_step_order"] = 0
@@ -867,8 +982,36 @@ class AvailabilitySlotSerializer(serializers.ModelSerializer):
         return attrs
 
 
+_EMAIL_SPLIT_RE = re.compile(r"[\s,;]+")
+
+
+def parse_invitee_emails(raw: str) -> list[str]:
+    """Accept a single email or a bulk list separated by commas, spaces, newlines, or semicolons."""
+    parts = [p.strip() for p in _EMAIL_SPLIT_RE.split((raw or "").strip()) if p.strip()]
+    seen: set[str] = set()
+    emails: list[str] = []
+    for part in parts:
+        try:
+            validate_email(part)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(f"Invalid email: {part}") from exc
+        key = part.lower()
+        if key not in seen:
+            seen.add(key)
+            emails.append(part)
+    return emails
+
+
 class MeetingSerializer(serializers.ModelSerializer):
     host = UserSerializer(read_only=True)
+    mentioned_users = UserSerializer(many=True, read_only=True)
+    mentioned_user_ids = serializers.PrimaryKeyRelatedField(
+        source="mentioned_users",
+        queryset=User.objects.filter(is_active=True),
+        many=True,
+        write_only=True,
+        required=False,
+    )
 
     class Meta:
         model = Meeting
@@ -876,6 +1019,10 @@ class MeetingSerializer(serializers.ModelSerializer):
             "id",
             "host",
             "title",
+            "job_detail",
+            "target_role",
+            "mentioned_users",
+            "mentioned_user_ids",
             "starts_at",
             "ends_at",
             "invitee_name",
@@ -890,10 +1037,24 @@ class MeetingSerializer(serializers.ModelSerializer):
         )
         read_only_fields = ("host", "created_at", "updated_at")
 
+    def validate_invitee_email(self, value):
+        emails = parse_invitee_emails(value)
+        if not emails:
+            raise serializers.ValidationError("At least one invitee email is required.")
+        return ", ".join(emails)
+
+    def validate_target_role(self, value):
+        if not value:
+            return ""
+        allowed = {c.value for c in Meeting.TargetRole}
+        if value not in allowed:
+            raise serializers.ValidationError(f"Invalid target role. Choose from: {', '.join(sorted(allowed))}.")
+        return value
+
 
 class PublicBookSerializer(serializers.Serializer):
     invitee_name = serializers.CharField(max_length=200)
-    invitee_email = serializers.EmailField()
+    invitee_email = serializers.CharField()
     starts_at = serializers.DateTimeField()
     ends_at = serializers.DateTimeField()
     title = serializers.CharField(max_length=255, required=False, allow_blank=True, default="Meeting")
@@ -903,6 +1064,12 @@ class PublicBookSerializer(serializers.Serializer):
     opportunity = serializers.PrimaryKeyRelatedField(
         queryset=Opportunity.objects.all(), required=False, allow_null=True
     )
+
+    def validate_invitee_email(self, value):
+        emails = parse_invitee_emails(value)
+        if not emails:
+            raise serializers.ValidationError("At least one invitee email is required.")
+        return ", ".join(emails)
 
     def validate(self, attrs):
         if attrs["starts_at"] >= attrs["ends_at"]:

@@ -27,6 +27,12 @@ class Lead(TimeStampedModel):
         EVENT = "event", "Event"
         OTHER = "other", "Other"
 
+    class Priority(models.TextChoices):
+        LOW = "low", "Low"
+        MEDIUM = "medium", "Medium"
+        HIGH = "high", "High"
+        URGENT = "urgent", "Urgent"
+
     name = models.CharField(max_length=200)
     email = models.EmailField()
     company = models.CharField(max_length=200)
@@ -34,6 +40,12 @@ class Lead(TimeStampedModel):
     industry = models.CharField(max_length=120, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.NEW)
     source = models.CharField(max_length=20, choices=Source.choices, default=Source.WEBSITE)
+    priority = models.CharField(max_length=20, choices=Priority.choices, default=Priority.MEDIUM)
+    budget_amount = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Budget in USD dollars; UI slider starts at 1000.",
+    )
     notes = models.TextField(blank=True)
     score = models.PositiveSmallIntegerField(default=0)
     score_reasons = models.JSONField(default=list, blank=True)
@@ -217,9 +229,9 @@ class Activity(TimeStampedModel):
 
 
 class DealComment(TimeStampedModel):
-    """Threaded-style notes on an opportunity; body may include @username mentions."""
+    """Deprecated: use Comment. Kept for migration compatibility until data is copied."""
 
-    opportunity = models.ForeignKey(Opportunity, on_delete=models.CASCADE, related_name="comments")
+    opportunity = models.ForeignKey(Opportunity, on_delete=models.CASCADE, related_name="legacy_comments")
     author = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -235,17 +247,45 @@ class DealComment(TimeStampedModel):
 
 
 class Task(TimeStampedModel):
-    """Reminders / to-dos tied to a lead or opportunity (also used by email sequences)."""
+    """Reminders / to-dos tied to a lead or opportunity."""
+
+    class Status(models.TextChoices):
+        TODO = "todo", "To do"
+        IN_PROGRESS = "in_progress", "In progress"
+        BLOCKED = "blocked", "Blocked"
+        DONE = "done", "Done"
+
+    class Priority(models.TextChoices):
+        LOW = "low", "Low"
+        MEDIUM = "medium", "Medium"
+        HIGH = "high", "High"
+        URGENT = "urgent", "Urgent"
 
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
     due_at = models.DateTimeField(null=True, blank=True)
     completed = models.BooleanField(default=False)
     completed_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.TODO)
+    priority = models.CharField(max_length=20, choices=Priority.choices, default=Priority.MEDIUM)
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="tasks",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="tasks_created",
+    )
+    parent = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="children",
     )
     lead = models.ForeignKey(
         Lead,
@@ -267,6 +307,81 @@ class Task(TimeStampedModel):
 
     def __str__(self) -> str:
         return self.title
+
+    def save(self, *args, **kwargs):
+        if self.completed and self.status != self.Status.DONE:
+            self.status = self.Status.DONE
+        if self.status == self.Status.DONE:
+            self.completed = True
+            if not self.completed_at:
+                self.completed_at = timezone.now()
+        else:
+            self.completed = False
+            self.completed_at = None
+        super().save(*args, **kwargs)
+
+
+class Comment(TimeStampedModel):
+    """Polymorphic threaded comments; body may include @ROLE and @@username mentions."""
+
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="crm_comments",
+    )
+    body = models.TextField()
+    parent = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="replies",
+    )
+    opportunity = models.ForeignKey(
+        Opportunity,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="comments",
+    )
+    lead = models.ForeignKey(
+        Lead,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="comments",
+    )
+    task = models.ForeignKey(
+        Task,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="comments",
+    )
+    meeting = models.ForeignKey(
+        "Meeting",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="comments",
+    )
+
+    class Meta:
+        ordering = ["created_at"]
+
+    def __str__(self) -> str:
+        return f"Comment by {self.author_id}"
+
+    def mention_link(self) -> str:
+        if self.opportunity_id:
+            return f"/opportunities/{self.opportunity_id}"
+        if self.lead_id:
+            return f"/leads/{self.lead_id}"
+        if self.task_id:
+            return f"/tasks/{self.task_id}"
+        if self.meeting_id:
+            return "/calendar"
+        return ""
 
 
 class TimelineEvent(TimeStampedModel):
@@ -437,6 +552,7 @@ class EmailTemplate(TimeStampedModel):
 
 class Sequence(TimeStampedModel):
     name = models.CharField(max_length=120)
+    description = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -452,9 +568,13 @@ class Sequence(TimeStampedModel):
 
 
 class SequenceStep(TimeStampedModel):
+    class StepType(models.TextChoices):
+        EMAIL = "email", "Email"
+
     sequence = models.ForeignKey(Sequence, on_delete=models.CASCADE, related_name="steps")
     order = models.PositiveIntegerField(default=1)
     delay_days = models.PositiveIntegerField(default=0)
+    step_type = models.CharField(max_length=20, choices=StepType.choices, default=StepType.EMAIL)
     template = models.ForeignKey(
         EmailTemplate,
         on_delete=models.PROTECT,
@@ -486,6 +606,8 @@ class SequenceEnrollment(TimeStampedModel):
         related_name="sequence_enrollments",
     )
     last_message = models.CharField(max_length=255, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    cancel_reason = models.CharField(max_length=255, blank=True)
 
     class Meta:
         ordering = ["-created_at"]
@@ -587,16 +709,30 @@ class Meeting(TimeStampedModel):
         CANCELLED = "cancelled", "Cancelled"
         COMPLETED = "completed", "Completed"
 
+    class TargetRole(models.TextChoices):
+        SDR = "SDR", "Sales Development"
+        AE = "AE", "Account Executive"
+        MANAGER = "MANAGER", "Sales Manager"
+        ALL = "ALL", "All roles"
+
     host = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="hosted_meetings",
     )
     title = models.CharField(max_length=255, default="Meeting")
+    job_detail = models.TextField(blank=True)
+    target_role = models.CharField(max_length=20, choices=TargetRole.choices, blank=True)
+    mentioned_users = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name="mentioned_in_meetings",
+    )
     starts_at = models.DateTimeField()
     ends_at = models.DateTimeField()
     invitee_name = models.CharField(max_length=200)
-    invitee_email = models.EmailField()
+    # One or more emails (comma / newline / semicolon separated).
+    invitee_email = models.TextField()
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.SCHEDULED)
     lead = models.ForeignKey(
         Lead,

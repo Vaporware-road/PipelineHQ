@@ -29,9 +29,9 @@ from .models import (
     AuditEvent,
     AvailabilitySlot,
     AiSuggestion,
+    Comment,
     Contact,
     CustomFieldDefinition,
-    DealComment,
     EmailMessage,
     EmailTemplate,
     JobRun,
@@ -56,6 +56,7 @@ from .serializers import (
     AiSuggestionSerializer,
     AuditEventSerializer,
     AvailabilitySlotSerializer,
+    CommentSerializer,
     ContactSerializer,
     CustomFieldDefinitionSerializer,
     DealCommentSerializer,
@@ -107,13 +108,35 @@ def _owned_queryset(qs, user, owner_field="owner"):
     return qs.filter(**{owner_field: user})
 
 
+def _comments_response(qs, request):
+    roots = qs.filter(parent__isnull=True).select_related("author").prefetch_related("replies__author")
+    return Response(CommentSerializer(roots, many=True, context={"request": request}).data)
+
+
+def _create_comment(request, **fk_kwargs):
+    serializer = CommentSerializer(data=request.data, context={"request": request})
+    serializer.is_valid(raise_exception=True)
+    comment = serializer.save(**fk_kwargs)
+    return Response(CommentSerializer(comment, context={"request": request}).data, status=status.HTTP_201_CREATED)
+
+
+def _delete_comment(request, comment: Comment | None):
+    if comment is None:
+        return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+    user = request.user
+    if user.role != User.Role.MANAGER and comment.author_id != user.id:
+        return Response({"detail": "Not allowed."}, status=status.HTTP_403_FORBIDDEN)
+    comment.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class LeadViewSet(viewsets.ModelViewSet):
     serializer_class = LeadSerializer
     permission_classes = [IsAuthenticated, RoleScopedAccess]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_class = LeadFilter
     search_fields = ["name", "email", "company"]
-    ordering_fields = ["created_at", "company", "status", "score"]
+    ordering_fields = ["created_at", "company", "status", "score", "priority", "budget_amount"]
 
     def get_queryset(self):
         return _owned_queryset(Lead.objects.select_related("owner"), self.request.user)
@@ -202,6 +225,19 @@ class LeadViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_201_CREATED,
         )
+
+    @action(detail=True, methods=["get", "post"], url_path="comments")
+    def comments(self, request, pk=None):
+        lead = self.get_object()
+        if request.method == "GET":
+            return _comments_response(lead.comments.all(), request)
+        return _create_comment(request, lead=lead)
+
+    @action(detail=True, methods=["delete"], url_path=r"comments/(?P<comment_id>[^/.]+)")
+    def delete_comment(self, request, pk=None, comment_id=None):
+        lead = self.get_object()
+        comment = Comment.objects.filter(lead=lead, pk=comment_id).first()
+        return _delete_comment(request, comment)
 
     @action(
         detail=False,
@@ -413,24 +449,14 @@ class OpportunityViewSet(viewsets.ModelViewSet):
     def comments(self, request, pk=None):
         opp = self.get_object()
         if request.method == "GET":
-            qs = opp.comments.select_related("author")
-            return Response(DealCommentSerializer(qs, many=True).data)
-        serializer = DealCommentSerializer(data=request.data, context={"request": request})
-        serializer.is_valid(raise_exception=True)
-        comment = serializer.save(opportunity=opp)
-        return Response(DealCommentSerializer(comment).data, status=status.HTTP_201_CREATED)
+            return _comments_response(opp.comments.all(), request)
+        return _create_comment(request, opportunity=opp)
 
     @action(detail=True, methods=["delete"], url_path=r"comments/(?P<comment_id>[^/.]+)")
     def delete_comment(self, request, pk=None, comment_id=None):
         opp = self.get_object()
-        comment = DealComment.objects.filter(opportunity=opp, pk=comment_id).first()
-        if comment is None:
-            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
-        user = request.user
-        if user.role != User.Role.MANAGER and comment.author_id != user.id:
-            return Response({"detail": "Not allowed."}, status=status.HTTP_403_FORBIDDEN)
-        comment.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        comment = Comment.objects.filter(opportunity=opp, pk=comment_id).first()
+        return _delete_comment(request, comment)
 
 
 class ActivityViewSet(viewsets.ModelViewSet):
@@ -461,12 +487,12 @@ class TaskViewSet(viewsets.ModelViewSet):
     serializer_class = TaskSerializer
     permission_classes = [IsAuthenticated, RoleScopedAccess]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ["completed", "lead", "opportunity", "owner"]
+    filterset_fields = ["completed", "lead", "opportunity", "owner", "parent", "status", "priority"]
     search_fields = ["title", "description"]
-    ordering_fields = ["due_at", "created_at", "completed"]
+    ordering_fields = ["due_at", "created_at", "completed", "status", "priority"]
 
     def get_queryset(self):
-        qs = Task.objects.select_related("owner", "lead", "opportunity")
+        qs = Task.objects.select_related("owner", "created_by", "lead", "opportunity", "parent")
         user = self.request.user
         params = self.request.query_params
         if params.get("mine") in {"1", "true", "yes"}:
@@ -475,7 +501,22 @@ class TaskViewSet(viewsets.ModelViewSet):
             qs = qs.filter(owner=user)
         if params.get("overdue") in {"1", "true", "yes"}:
             qs = qs.filter(completed=False, due_at__lt=timezone.now())
+        if params.get("roots") in {"1", "true", "yes"}:
+            qs = qs.filter(parent__isnull=True)
         return qs
+
+    @action(detail=True, methods=["get", "post"], url_path="comments")
+    def comments(self, request, pk=None):
+        task = self.get_object()
+        if request.method == "GET":
+            return _comments_response(task.comments.all(), request)
+        return _create_comment(request, task=task)
+
+    @action(detail=True, methods=["delete"], url_path=r"comments/(?P<comment_id>[^/.]+)")
+    def delete_comment(self, request, pk=None, comment_id=None):
+        task = self.get_object()
+        comment = Comment.objects.filter(task=task, pk=comment_id).first()
+        return _delete_comment(request, comment)
 
 
 class NotificationViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
@@ -546,6 +587,15 @@ class SequenceViewSet(viewsets.ModelViewSet):
         serializer.save()
         return Response(SequenceSerializer(sequence).data, status=status.HTTP_201_CREATED)
 
+    @action(detail=True, methods=["delete"], url_path=r"steps/(?P<step_id>[^/.]+)")
+    def delete_step(self, request, pk=None, step_id=None):
+        sequence = self.get_object()
+        step = sequence.steps.filter(pk=step_id).first()
+        if step is None:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        step.delete()
+        return Response(SequenceSerializer(sequence).data)
+
 
 class SequenceEnrollmentViewSet(viewsets.ModelViewSet):
     serializer_class = SequenceEnrollmentSerializer
@@ -568,8 +618,12 @@ class SequenceEnrollmentViewSet(viewsets.ModelViewSet):
     def cancel(self, request, pk=None):
         enrollment = self.get_object()
         enrollment.status = SequenceEnrollment.Status.CANCELLED
+        enrollment.cancelled_at = timezone.now()
+        enrollment.cancel_reason = (request.data.get("reason") or "")[:255]
         enrollment.last_message = "Cancelled by user"
-        enrollment.save(update_fields=["status", "last_message", "updated_at"])
+        enrollment.save(
+            update_fields=["status", "cancelled_at", "cancel_reason", "last_message", "updated_at"]
+        )
         return Response(SequenceEnrollmentSerializer(enrollment).data)
 
     @action(
@@ -1149,16 +1203,49 @@ class MeetingViewSet(viewsets.ModelViewSet):
     serializer_class = MeetingSerializer
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, OrderingFilter]
+    # target_role is applied in get_queryset so ALL-role meetings can be included with a role filter
     filterset_fields = ["status", "host", "opportunity", "lead"]
     ordering_fields = ["starts_at", "created_at"]
     http_method_names = ["get", "post", "patch", "head", "options"]
 
+    def get_permissions(self):
+        # Only managers may create or edit meetings.
+        if self.action in {"create", "partial_update", "update", "destroy"}:
+            return [IsAuthenticated(), IsManager()]
+        return super().get_permissions()
+
     def get_queryset(self):
-        qs = Meeting.objects.select_related("host", "lead", "contact", "opportunity")
+        qs = Meeting.objects.select_related("host", "lead", "contact", "opportunity").prefetch_related(
+            "mentioned_users"
+        )
         user = self.request.user
+        params = self.request.query_params
+
         if user.role == User.Role.MANAGER:
-            return qs
-        return qs.filter(host=user)
+            if params.get("mentioned_me") in {"1", "true", "yes"}:
+                qs = qs.filter(mentioned_users=user)
+            elif params.get("target_role"):
+                role = params.get("target_role")
+                if role == Meeting.TargetRole.ALL:
+                    qs = qs.filter(target_role=Meeting.TargetRole.ALL)
+                else:
+                    qs = qs.filter(Q(target_role=role) | Q(target_role=Meeting.TargetRole.ALL))
+            # else: manager sees all meetings
+        else:
+            # Non-managers only see meetings that include them (role target or explicit mention).
+            qs = qs.filter(
+                Q(mentioned_users=user)
+                | Q(target_role=user.role)
+                | Q(target_role=Meeting.TargetRole.ALL)
+            ).distinct()
+
+        starts_after = params.get("starts_at_after")
+        starts_before = params.get("starts_at_before")
+        if starts_after:
+            qs = qs.filter(starts_at__gte=starts_after)
+        if starts_before:
+            qs = qs.filter(starts_at__lte=starts_before)
+        return qs
 
     def perform_create(self, serializer):
         from .timeline import record_timeline_event
@@ -1190,6 +1277,29 @@ class MeetingViewSet(viewsets.ModelViewSet):
             kind=Notification.Kind.MEETING,
             link="/calendar",
         )
+        for u in meeting.mentioned_users.all():
+            if u.id == meeting.host_id:
+                continue
+            create_notification(
+                user=u,
+                title=f"Mentioned on meeting: {meeting.title}",
+                body=meeting.job_detail[:280] or f"With {meeting.invitee_name}",
+                kind=Notification.Kind.MEETING,
+                link="/calendar",
+            )
+
+    @action(detail=True, methods=["get", "post"], url_path="comments")
+    def comments(self, request, pk=None):
+        meeting = self.get_object()
+        if request.method == "GET":
+            return _comments_response(meeting.comments.all(), request)
+        return _create_comment(request, meeting=meeting)
+
+    @action(detail=True, methods=["delete"], url_path=r"comments/(?P<comment_id>[^/.]+)")
+    def delete_comment(self, request, pk=None, comment_id=None):
+        meeting = self.get_object()
+        comment = Comment.objects.filter(meeting=meeting, pk=comment_id).first()
+        return _delete_comment(request, comment)
 
 
 class PublicBookingView(APIView):
@@ -1202,7 +1312,7 @@ class PublicBookingView(APIView):
         from django.utils.dateparse import parse_date
 
         try:
-            host = User.objects.get(booking_slug=slug, is_active=True)
+            host = User.objects.get(booking_slug=slug, is_active=True, role=User.Role.MANAGER)
         except User.DoesNotExist:
             return Response({"detail": "Booking page not found."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -1259,7 +1369,7 @@ class PublicBookingView(APIView):
         from .timeline import record_timeline_event
 
         try:
-            host = User.objects.get(booking_slug=slug, is_active=True)
+            host = User.objects.get(booking_slug=slug, is_active=True, role=User.Role.MANAGER)
         except User.DoesNotExist:
             return Response({"detail": "Booking page not found."}, status=status.HTTP_404_NOT_FOUND)
 

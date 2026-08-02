@@ -1,15 +1,17 @@
 "use client";
 
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { DatePicker, DateTimeFields } from "@/components/DateTimeFields";
 import { TimelineFeed } from "@/components/TimelineFeed";
+import { CommentThread } from "@/components/CommentThread";
 import { CustomFieldsPanel } from "@/components/CustomFieldsPanel";
 import { AiAssistPanel } from "@/components/AiAssistPanel";
 import { Badge, Button, Card, Empty, Input, Money, PageHeader, Select, Textarea } from "@/components/ui";
 import { api, apiList } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
-import type { CrmTask, DealComment, Opportunity, OutboundEmail, Product, Quote } from "@/lib/types";
+import type { CrmTask, Opportunity, OutboundEmail, Product, Quote } from "@/lib/types";
 
 const MEDDIC_FIELDS: { key: keyof Opportunity; label: string; hint: string }[] = [
   { key: "metrics", label: "Metrics", hint: "Quantified economic impact" },
@@ -33,7 +35,6 @@ export default function OpportunityDetailPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [activity, setActivity] = useState({ type: "note", subject: "", body: "" });
-  const [commentBody, setCommentBody] = useState("");
   const [taskForm, setTaskForm] = useState({ title: "", due_at: "" });
   const [closeModal, setCloseModal] = useState<"closed_won" | "closed_lost" | null>(null);
   const [closeReason, setCloseReason] = useState("");
@@ -218,25 +219,6 @@ export default function OpportunityDetailPage() {
       setTimelineKey((k) => k + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Send failed");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function addComment(e: React.FormEvent) {
-    e.preventDefault();
-    if (!commentBody.trim()) return;
-    setBusy(true);
-    setError("");
-    try {
-      const created = await api<DealComment>(`/api/opportunities/${params.id}/comments/`, {
-        method: "POST",
-        body: JSON.stringify({ body: commentBody }),
-      });
-      setCommentBody("");
-      setOpp((prev) => (prev ? { ...prev, comments: [...(prev.comments || []), created] } : prev));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Comment failed");
     } finally {
       setBusy(false);
     }
@@ -556,9 +538,12 @@ export default function OpportunityDetailPage() {
                     className="flex flex-col gap-2 rounded-lg border border-[var(--line)] p-3 sm:flex-row sm:items-center sm:justify-between"
                   >
                     <div>
-                      <p className={`text-sm font-medium ${task.completed ? "line-through opacity-70" : ""}`}>
+                      <Link
+                        href={`/tasks/${task.id}`}
+                        className={`text-sm font-medium text-[var(--cyan)] hover:underline ${task.completed ? "line-through opacity-70" : ""}`}
+                      >
                         {task.title}
-                      </p>
+                      </Link>
                       <p className="text-xs text-[var(--muted)]">
                         {task.due_at ? `Due ${formatDateTime(task.due_at)}` : "No due date"}
                         {overdue ? " · overdue" : ""}
@@ -598,33 +583,9 @@ export default function OpportunityDetailPage() {
 
           <Card>
             <h2 className="font-[family-name:var(--font-display)] text-lg">Comments</h2>
-            <p className="mt-1 text-sm text-[var(--muted)]">
-              Use @username (e.g. @manager) to notify teammates in Alerts.
-            </p>
-            <div className="mt-3 space-y-3">
-              {(opp.comments || []).map((c) => (
-                <div key={c.id} className="rounded-lg border border-[var(--line)] p-3">
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--muted)]">
-                    <span className="font-medium text-[var(--ink)]">{c.author.username}</span>
-                    <span>{formatDateTime(c.created_at)}</span>
-                  </div>
-                  <p className="mt-1 whitespace-pre-wrap text-sm">{c.body}</p>
-                </div>
-              ))}
-              {(opp.comments || []).length === 0 ? <Empty>No comments yet.</Empty> : null}
+            <div className="mt-3">
+              <CommentThread endpoint={`/api/opportunities/${params.id}/comments/`} refreshKey={timelineKey} />
             </div>
-            <form className="mt-3 grid gap-2" onSubmit={addComment}>
-              <Textarea
-                rows={3}
-                placeholder="Add a comment… try @ae or @manager"
-                value={commentBody}
-                onChange={(e) => setCommentBody(e.target.value)}
-                required
-              />
-              <Button type="submit" disabled={busy || !commentBody.trim()}>
-                Post comment
-              </Button>
-            </form>
           </Card>
 
           <Card>

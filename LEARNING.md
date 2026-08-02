@@ -143,7 +143,7 @@ Important custom actions:
 | `crm.export_analytics_csv` | Reports export | Analytics CSV via Celery |
 | `crm.flag_stale_deals` | Beat hourly + Admin → Operations | Sets `Opportunity.is_stale` |
 | `crm.warm_dashboard_cache` | Beat nightly + Admin → Operations | Precomputes KPI payloads |
-| `crm.advance_sequence_enrollments` | Beat + Admin / Sequences | Creates EmailMessage + Celery send (+ tasks/notifications) |
+| `crm.advance_sequence_enrollments` | Beat + Admin / Sequences | Creates EmailMessage + Celery send (+ notifications) |
 | `crm.notify_overdue_tasks` | Beat hourly | Notifies owners of overdue incomplete tasks |
 | `crm.reset_demo_data` | Admin → Operations | Re-runs `seed_demo --reset` |
 

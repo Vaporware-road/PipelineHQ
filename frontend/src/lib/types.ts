@@ -29,6 +29,8 @@ export type Lead = {
   industry: string;
   status: string;
   source: string;
+  priority: "low" | "medium" | "high" | "urgent" | string;
+  budget_amount: number | null;
   notes: string;
   score: number;
   score_reasons: { factor: string; detail: string; points: number }[];
@@ -41,13 +43,20 @@ export type Lead = {
   created_at: string;
 };
 
-export type DealComment = {
+export type CrmComment = {
   id: number;
-  opportunity: number;
   author: User;
   body: string;
+  parent: number | null;
+  opportunity: number | null;
+  lead: number | null;
+  task: number | null;
+  meeting: number | null;
+  replies?: CrmComment[];
   created_at: string;
 };
+
+export type DealComment = CrmComment;
 
 export type Opportunity = {
   id: number;
@@ -90,11 +99,17 @@ export type CrmTask = {
   due_at: string | null;
   completed: boolean;
   completed_at: string | null;
+  status: "todo" | "in_progress" | "blocked" | "done" | string;
+  priority: "low" | "medium" | "high" | "urgent" | string;
   owner: User;
+  created_by: User | null;
+  parent: number | null;
   lead: number | null;
   lead_name: string | null;
   opportunity: number | null;
   opportunity_name: string | null;
+  children?: CrmTask[];
+  comment_count?: number;
   created_at: string;
 };
 
@@ -299,6 +314,7 @@ export type SequenceStep = {
   sequence: number;
   order: number;
   delay_days: number;
+  step_type: string;
   template: number;
   template_name: string;
   template_subject: string;
@@ -307,10 +323,12 @@ export type SequenceStep = {
 export type Sequence = {
   id: number;
   name: string;
+  description: string;
   is_active: boolean;
   created_by: User;
   steps: SequenceStep[];
   step_count: number;
+  enrollment_count?: number;
 };
 
 export type SequenceEnrollment = {
@@ -324,6 +342,18 @@ export type SequenceEnrollment = {
   current_step_order: number;
   next_run_at: string | null;
   last_message: string;
+  cancelled_at?: string | null;
+  cancel_reason?: string;
+  recent_messages?: {
+    id: number;
+    subject: string;
+    status: string;
+    open_count: number;
+    click_count: number;
+    opened_at: string | null;
+    clicked_at: string | null;
+    sent_at: string | null;
+  }[];
   enrolled_by: User;
 };
 
@@ -375,9 +405,14 @@ export type Meeting = {
   id: number;
   host: User;
   title: string;
+  job_detail: string;
+  /** SDR | AE | MANAGER | ALL | "" */
+  target_role: Role | "ALL" | "" | string;
+  mentioned_users: User[];
   starts_at: string;
   ends_at: string;
   invitee_name: string;
+  /** One or more emails, comma-separated after save */
   invitee_email: string;
   status: string;
   lead: number | null;
@@ -385,6 +420,7 @@ export type Meeting = {
   opportunity: number | null;
   notes: string;
   created_at: string;
+  updated_at?: string;
 };
 
 export type Product = {

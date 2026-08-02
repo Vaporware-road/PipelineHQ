@@ -24,6 +24,7 @@ from apps.crm.models import (
     AiSuggestion,
     AuditEvent,
     AvailabilitySlot,
+    Comment,
     Contact,
     CustomFieldDefinition,
     CustomFieldValue,
@@ -79,6 +80,7 @@ class Command(BaseCommand):
             AvailabilitySlot.objects.all().delete()
             TimelineEvent.objects.all().delete()
             Task.objects.all().delete()
+            Comment.objects.all().delete()
             DealComment.objects.all().delete()
             Notification.objects.all().delete()
             Activity.objects.all().delete()
@@ -158,6 +160,10 @@ class Command(BaseCommand):
                 industry=industry,
                 source=source,
                 status=choice([Lead.Status.NEW, Lead.Status.CONTACTED, Lead.Status.QUALIFIED]),
+                priority=choice(
+                    [Lead.Priority.LOW, Lead.Priority.MEDIUM, Lead.Priority.HIGH, Lead.Priority.URGENT]
+                ),
+                budget_amount=choice([1000, 5000, 10000, 25000, 50000, 100000]),
                 owner=sdr,
                 notes="Seeded inbound/outbound lead.",
             )
@@ -278,34 +284,34 @@ class Command(BaseCommand):
                     completed=False,
                 )
 
-        # Deal comments + @mentions (notification for mentioned user)
+        # Deal comments + @role / @@user mentions
         if len(opps) >= 2:
-            DealComment.objects.create(
+            Comment.objects.create(
                 opportunity=opps[0],
                 author=ae,
-                body="Just finished discovery — pain is clear. @manager worth a forecast bump?",
+                body="Just finished discovery — pain is clear. @MANAGER worth a forecast bump?",
             )
-            DealComment.objects.create(
+            Comment.objects.create(
                 opportunity=opps[0],
                 author=manager,
-                body="Looks good @ae — fill champion before you push to Proposal.",
+                body=f"Looks good @@{ae.username} — fill champion before you push to Proposal.",
             )
-            DealComment.objects.create(
+            Comment.objects.create(
                 opportunity=opps[2],
                 author=ae2,
-                body="Security questionnaire landed. @ae can you share the SSO checklist?",
+                body=f"Security questionnaire landed. @@{ae.username} can you share the SSO checklist?",
             )
             Notification.objects.create(
                 user=manager,
                 title="ae mentioned you",
-                body="Just finished discovery — pain is clear. @manager worth a forecast bump?",
+                body="Just finished discovery — pain is clear. @MANAGER worth a forecast bump?",
                 kind=Notification.Kind.MENTION,
                 link=f"/opportunities/{opps[0].id}",
             )
             Notification.objects.create(
                 user=ae,
                 title="manager mentioned you",
-                body="Looks good @ae — fill champion before you push to Proposal.",
+                body=f"Looks good @@{ae.username} — fill champion before you push to Proposal.",
                 kind=Notification.Kind.MENTION,
                 link=f"/opportunities/{opps[0].id}",
             )
@@ -602,13 +608,6 @@ class Command(BaseCommand):
         defs = [
             (
                 CustomFieldDefinition.Entity.LEAD,
-                "budget_range",
-                "Budget range",
-                CustomFieldDefinition.FieldType.SELECT,
-                ["<$10k", "$10k–50k", "$50k+"],
-            ),
-            (
-                CustomFieldDefinition.Entity.LEAD,
                 "use_case",
                 "Primary use case",
                 CustomFieldDefinition.FieldType.TEXT,
@@ -654,13 +653,19 @@ class Command(BaseCommand):
                     "is_active": True,
                 },
             )
+        # Deactivate legacy budget_range custom field if present
+        CustomFieldDefinition.objects.filter(entity="lead", key="budget_range").update(is_active=False)
 
         lead = Lead.objects.order_by("id").first()
         if lead:
+            if not lead.budget_amount:
+                lead.budget_amount = 50000
+                lead.priority = Lead.Priority.HIGH
+                lead.save(update_fields=["budget_amount", "priority", "updated_at"])
             set_custom_fields(
                 "lead",
                 lead.pk,
-                {"budget_range": "$50k+", "use_case": "Outbound pipeline visibility"},
+                {"use_case": "Outbound pipeline visibility"},
             )
         if accounts:
             set_custom_fields("account", accounts[0].pk, {"employee_count": 120})

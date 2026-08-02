@@ -3,29 +3,72 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { TimelineFeed } from "@/components/TimelineFeed";
+import { CommentThread } from "@/components/CommentThread";
 import { CustomFieldsPanel } from "@/components/CustomFieldsPanel";
+import { TimelineFeed } from "@/components/TimelineFeed";
 import { Badge, Button, Card, Empty, Input, PageHeader, Select, Textarea } from "@/components/ui";
-import { api } from "@/lib/api";
+import { api, apiList } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import type { Lead } from "@/lib/types";
+import { roleLabel } from "@/lib/roles";
+import type { CrmTask, DuplicateSuspect, Lead, Sequence, SequenceEnrollment, User } from "@/lib/types";
+
+const PRIORITIES = ["low", "medium", "high", "urgent"] as const;
+const BUDGET_MIN = 1000;
+const BUDGET_MAX = 500000;
+const BUDGET_STEP = 1000;
+
+function formatBudget(amount: number) {
+  if (amount >= 1000) return `$${(amount / 1000).toFixed(amount % 1000 === 0 ? 0 : 1)}k`;
+  return `$${amount}`;
+}
 
 export default function LeadDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const { user } = useAuth();
   const [lead, setLead] = useState<Lead | null>(null);
+  const [team, setTeam] = useState<User[]>([]);
+  const [tasks, setTasks] = useState<CrmTask[]>([]);
+  const [sequences, setSequences] = useState<Sequence[]>([]);
+  const [enrollments, setEnrollments] = useState<SequenceEnrollment[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [timelineKey, setTimelineKey] = useState(0);
   const [mergeLoser, setMergeLoser] = useState("");
+  const [taskTitle, setTaskTitle] = useState("");
+  const [enrollSeq, setEnrollSeq] = useState("");
+  const [dupes, setDupes] = useState<DuplicateSuspect[]>([]);
 
   async function load() {
     try {
-      setLead(await api<Lead>(`/api/leads/${params.id}/`));
+      const [l, t, s, e] = await Promise.all([
+        api<Lead>(`/api/leads/${params.id}/`),
+        apiList<CrmTask>(`/api/tasks/?lead=${params.id}`),
+        apiList<Sequence>("/api/sequences/?is_active=true"),
+        apiList<SequenceEnrollment>(`/api/sequence-enrollments/?lead=${params.id}`),
+      ]);
+      setLead(l);
+      setTasks(t);
+      setSequences(s);
+      setEnrollments(e);
       setError("");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load lead");
+      try {
+        const res = await api<{ duplicates: DuplicateSuspect[] }>("/api/duplicates/check/", {
+          method: "POST",
+          body: JSON.stringify({
+            entity_type: "lead",
+            email: l.email,
+            name: l.name,
+            company: l.company,
+            exclude_id: l.id,
+          }),
+        });
+        setDupes((res.duplicates || []).filter((d) => d.id !== l.id));
+      } catch {
+        setDupes([]);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load lead");
     }
   }
 
@@ -33,7 +76,13 @@ export default function LeadDetailPage() {
     load();
   }, [params.id]);
 
-  async function saveField(patch: Partial<Lead>) {
+  useEffect(() => {
+    apiList<User>("/api/auth/team/")
+      .then(setTeam)
+      .catch(() => setTeam([]));
+  }, []);
+
+  async function saveField(patch: Partial<Lead> & { owner_id?: number; custom_fields?: Lead["custom_fields"] }) {
     setBusy(true);
     setError("");
     try {
@@ -85,6 +134,40 @@ export default function LeadDetailPage() {
     }
   }
 
+  async function addTask() {
+    if (!taskTitle.trim()) return;
+    setBusy(true);
+    try {
+      await api("/api/tasks/", {
+        method: "POST",
+        body: JSON.stringify({ title: taskTitle, lead: Number(params.id) }),
+      });
+      setTaskTitle("");
+      setTasks(await apiList<CrmTask>(`/api/tasks/?lead=${params.id}`));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Task create failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function enroll() {
+    if (!enrollSeq) return;
+    setBusy(true);
+    try {
+      await api("/api/sequence-enrollments/", {
+        method: "POST",
+        body: JSON.stringify({ sequence: Number(enrollSeq), lead: Number(params.id) }),
+      });
+      setEnrollSeq("");
+      setEnrollments(await apiList<SequenceEnrollment>(`/api/sequence-enrollments/?lead=${params.id}`));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Enroll failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (!lead) {
     return (
       <div>
@@ -93,6 +176,9 @@ export default function LeadDetailPage() {
       </div>
     );
   }
+
+  const budget = lead.budget_amount ?? BUDGET_MIN;
+  const canReassign = user?.role === "MANAGER";
 
   return (
     <div>
@@ -181,6 +267,51 @@ export default function LeadDetailPage() {
                 <option value="other">Other</option>
               </Select>
             </Field>
+            <Field label="Owner">
+              <Select
+                value={lead.owner.id}
+                disabled={busy || !canReassign}
+                onChange={(e) => saveField({ owner_id: Number(e.target.value) })}
+              >
+                {team.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.username} ({roleLabel(u.role)})
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Priority">
+              <div className="flex flex-wrap gap-1">
+                {PRIORITIES.map((p) => (
+                  <Button
+                    key={p}
+                    variant={lead.priority === p ? "primary" : "ghost"}
+                    disabled={busy}
+                    onClick={() => saveField({ priority: p })}
+                  >
+                    {p}
+                  </Button>
+                ))}
+              </div>
+            </Field>
+            <Field label={`Budget ${formatBudget(budget)}`}>
+              <input
+                type="range"
+                min={BUDGET_MIN}
+                max={BUDGET_MAX}
+                step={BUDGET_STEP}
+                value={budget}
+                disabled={busy}
+                className="w-full accent-[var(--cyan)]"
+                onChange={(e) => setLead({ ...lead, budget_amount: Number(e.target.value) })}
+                onMouseUp={(e) => saveField({ budget_amount: Number((e.target as HTMLInputElement).value) })}
+                onTouchEnd={(e) => saveField({ budget_amount: Number((e.target as HTMLInputElement).value) })}
+              />
+              <div className="mt-1 flex justify-between text-[11px] text-[var(--muted)]">
+                <span>$1k</span>
+                <span>$500k</span>
+              </div>
+            </Field>
             <Field label="Notes">
               <Textarea
                 rows={4}
@@ -194,29 +325,8 @@ export default function LeadDetailPage() {
             <div className="flex flex-wrap gap-2 text-xs text-[var(--muted)]">
               <Badge>{lead.status}</Badge>
               <Badge tone="ok">Score {lead.score}</Badge>
-              <span>Owner: {lead.owner.username}</span>
+              <Badge>{lead.priority}</Badge>
             </div>
-            <Button
-              variant="ghost"
-              disabled={busy}
-              onClick={async () => {
-                setBusy(true);
-                setError("");
-                try {
-                  const res = await api<{ lead: Lead }>(`/api/leads/${lead.id}/ai-score-overlay/`, {
-                    method: "POST",
-                    body: JSON.stringify({}),
-                  });
-                  setLead(res.lead);
-                } catch (e) {
-                  setError(e instanceof Error ? e.message : "AI score failed");
-                } finally {
-                  setBusy(false);
-                }
-              }}
-            >
-              Refine score (AI overlay)
-            </Button>
             {lead.score_reasons?.length ? (
               <ul className="space-y-1 text-xs text-[var(--muted)]">
                 {lead.score_reasons.map((r, i) => (
@@ -257,12 +367,85 @@ export default function LeadDetailPage() {
           ) : null}
         </Card>
 
-        <Card className="lg:col-span-2">
-          <h2 className="font-[family-name:var(--font-display)] text-lg">Timeline</h2>
-          <div className="mt-3">
-            <TimelineFeed scope={{ lead: Number(params.id) }} refreshKey={timelineKey} />
-          </div>
-        </Card>
+        <div className="space-y-4 lg:col-span-2">
+          <Card>
+            <h2 className="font-[family-name:var(--font-display)] text-lg">Timeline</h2>
+            <div className="mt-3">
+              <TimelineFeed scope={{ lead: Number(params.id) }} refreshKey={timelineKey} />
+            </div>
+          </Card>
+
+          <Card>
+            <h2 className="font-[family-name:var(--font-display)] text-lg">Tasks</h2>
+            <div className="mt-3 flex gap-2">
+              <Input placeholder="New task title" value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} />
+              <Button disabled={busy || !taskTitle.trim()} onClick={addTask}>
+                Add
+              </Button>
+            </div>
+            <ul className="mt-3 space-y-2">
+              {tasks.map((t) => (
+                <li key={t.id} className="flex items-center justify-between gap-2 text-sm">
+                  <Link href={`/tasks/${t.id}`} className="text-[var(--cyan)] hover:underline">
+                    {t.title}
+                  </Link>
+                  <Badge tone={t.completed ? "ok" : "neutral"}>{t.status}</Badge>
+                </li>
+              ))}
+              {tasks.length === 0 ? <Empty>No tasks on this lead.</Empty> : null}
+            </ul>
+          </Card>
+
+          <Card>
+            <h2 className="font-[family-name:var(--font-display)] text-lg">Sequence enroll</h2>
+            <p className="mt-1 text-xs text-[var(--muted)]">Email cadence for this lead (requires Celery to send).</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Select value={enrollSeq} onChange={(e) => setEnrollSeq(e.target.value)}>
+                <option value="">Select sequence…</option>
+                {sequences.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} ({s.step_count} steps)
+                  </option>
+                ))}
+              </Select>
+              <Button disabled={busy || !enrollSeq} onClick={enroll}>
+                Enroll
+              </Button>
+            </div>
+            <ul className="mt-3 space-y-1 text-sm">
+              {enrollments.map((e) => (
+                <li key={e.id} className="flex justify-between gap-2">
+                  <span>
+                    {e.sequence_name} · step {e.current_step_order}
+                  </span>
+                  <Badge>{e.status}</Badge>
+                </li>
+              ))}
+            </ul>
+          </Card>
+
+          <Card>
+            <h2 className="font-[family-name:var(--font-display)] text-lg">Comments</h2>
+            <div className="mt-3">
+              <CommentThread endpoint={`/api/leads/${params.id}/comments/`} refreshKey={timelineKey} />
+            </div>
+          </Card>
+
+          <Card>
+            <h2 className="font-[family-name:var(--font-display)] text-lg">Possible duplicates</h2>
+            <ul className="mt-3 space-y-2">
+              {dupes.map((d) => (
+                <li key={d.id} className="flex items-center justify-between gap-2 text-sm">
+                  <Link href={d.href} className="text-[var(--cyan)] hover:underline">
+                    {d.label}
+                  </Link>
+                  <span className="text-xs text-[var(--muted)]">{d.reasons?.join(" · ")}</span>
+                </li>
+              ))}
+              {dupes.length === 0 ? <Empty>No duplicate suspects.</Empty> : null}
+            </ul>
+          </Card>
+        </div>
       </div>
     </div>
   );

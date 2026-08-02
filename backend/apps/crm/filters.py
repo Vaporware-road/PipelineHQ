@@ -11,6 +11,7 @@ class CharInFilter(django_filters.BaseInFilter, django_filters.CharFilter):
 class LeadFilter(django_filters.FilterSet):
     status = CharInFilter(field_name="status", lookup_expr="in")
     source = CharInFilter(field_name="source", lookup_expr="in")
+    priority = CharInFilter(field_name="priority", lookup_expr="in")
     owner = django_filters.NumberFilter(field_name="owner_id")
     created_after = django_filters.IsoDateTimeFilter(field_name="created_at", lookup_expr="gte")
     created_before = django_filters.IsoDateTimeFilter(field_name="created_at", lookup_expr="lte")
@@ -21,7 +22,7 @@ class LeadFilter(django_filters.FilterSet):
 
     class Meta:
         model = Lead
-        fields = ["status", "source", "owner"]
+        fields = ["status", "source", "priority", "owner"]
 
     def filter_custom_field(self, qs, name, value):
         key = self.data.get("custom_key")

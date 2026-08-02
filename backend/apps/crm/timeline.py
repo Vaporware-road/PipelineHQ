@@ -10,8 +10,8 @@ from apps.accounts.serializers import UserSerializer
 
 from .models import (
     Activity,
+    Comment,
     Contact,
-    DealComment,
     EmailMessage,
     Lead,
     Meeting,
@@ -184,7 +184,7 @@ def build_timeline(
             )
 
         for c in (
-            DealComment.objects.filter(opportunity_id__in=opp_ids)
+            Comment.objects.filter(opportunity_id__in=opp_ids, parent__isnull=True)
             .select_related("author", "opportunity")
             .order_by("-created_at")[:limit]
         ):

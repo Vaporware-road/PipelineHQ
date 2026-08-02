@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { DatePicker } from "@/components/DateTimeFields";
 import { Badge, Button, Card, Empty, Input, PageHeader, Select } from "@/components/ui";
@@ -11,6 +12,7 @@ type LeadFilters = {
   status: string;
   source: string;
   owner: string;
+  priority: string;
   created_from: string;
   created_to: string;
   q: string;
@@ -20,9 +22,17 @@ const EMPTY_FILTERS: LeadFilters = {
   status: "",
   source: "",
   owner: "",
+  priority: "",
   created_from: "",
   created_to: "",
   q: "",
+};
+
+const PRIORITY_TONE: Record<string, "neutral" | "warn" | "ok"> = {
+  low: "neutral",
+  medium: "ok",
+  high: "warn",
+  urgent: "warn",
 };
 
 function buildQuery(filters: LeadFilters): string {
@@ -30,12 +40,19 @@ function buildQuery(filters: LeadFilters): string {
   if (filters.status) params.set("status", filters.status);
   if (filters.source) params.set("source", filters.source);
   if (filters.owner) params.set("owner", filters.owner);
+  if (filters.priority) params.set("priority", filters.priority);
   if (filters.created_from) params.set("created_from", filters.created_from);
   if (filters.created_to) params.set("created_to", filters.created_to);
   if (filters.q.trim()) params.set("search", filters.q.trim());
   params.set("ordering", "-score");
   const qs = params.toString();
   return qs ? `?${qs}` : "";
+}
+
+function formatBudget(amount: number | null | undefined) {
+  if (amount == null) return "—";
+  if (amount >= 1000) return `$${(amount / 1000).toFixed(amount % 1000 === 0 ? 0 : 1)}k`;
+  return `$${amount}`;
 }
 
 export default function LeadsPage() {
@@ -51,6 +68,7 @@ export default function LeadsPage() {
     company: "",
     title: "",
     source: "website",
+    priority: "medium",
   });
   const [csvText, setCsvText] = useState(
     "name,email,company,title,source\nAda Lovelace,ada@analytical.engine,Analytical Engine,Mathematician,website",
@@ -82,7 +100,7 @@ export default function LeadsPage() {
     setError("");
     try {
       await api("/api/leads/", { method: "POST", body: JSON.stringify(form) });
-      setForm({ name: "", email: "", company: "", title: "", source: "website" });
+      setForm({ name: "", email: "", company: "", title: "", source: "website", priority: "medium" });
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Create failed");
@@ -163,6 +181,17 @@ export default function LeadsPage() {
             </Button>
           ))}
         </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {(["low", "medium", "high", "urgent"] as const).map((p) => (
+            <Button
+              key={p}
+              variant={filters.priority === p ? "primary" : "ghost"}
+              onClick={() => setFilters({ ...filters, priority: filters.priority === p ? "" : p })}
+            >
+              {p}
+            </Button>
+          ))}
+        </div>
         <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
           <Select value={filters.source} onChange={(e) => setFilters({ ...filters, source: e.target.value })}>
             <option value="">All sources</option>
@@ -218,6 +247,12 @@ export default function LeadsPage() {
               <option value="event">Event</option>
               <option value="other">Other</option>
             </Select>
+            <Select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>
+              <option value="low">Low priority</option>
+              <option value="medium">Medium priority</option>
+              <option value="high">High priority</option>
+              <option value="urgent">Urgent</option>
+            </Select>
             <Button type="submit" disabled={busy}>
               Create lead
             </Button>
@@ -244,9 +279,10 @@ export default function LeadsPage() {
             <tr>
               <th>Name</th>
               <th>Company</th>
+              <th>Budget</th>
+              <th>Priority</th>
               <th>Score</th>
               <th>Status</th>
-              <th>Source</th>
               <th>Owner</th>
               <th />
             </tr>
@@ -255,10 +291,16 @@ export default function LeadsPage() {
             {leads.map((lead) => (
               <tr key={lead.id}>
                 <td>
-                  <div className="font-medium">{lead.name}</div>
+                  <Link href={`/leads/${lead.id}`} className="font-medium text-[var(--cyan)] hover:underline">
+                    {lead.name}
+                  </Link>
                   <div className="text-xs text-[var(--muted)]">{lead.email}</div>
                 </td>
                 <td>{lead.company}</td>
+                <td className="tabular-nums text-sm">{formatBudget(lead.budget_amount)}</td>
+                <td>
+                  <Badge tone={PRIORITY_TONE[lead.priority] || "neutral"}>{lead.priority}</Badge>
+                </td>
                 <td>
                   <span
                     className="font-medium tabular-nums"
@@ -272,16 +314,20 @@ export default function LeadsPage() {
                 <td>
                   <Badge tone={lead.status === "converted" ? "ok" : "neutral"}>{lead.status}</Badge>
                 </td>
-                <td>{lead.source}</td>
                 <td className="text-sm text-[var(--muted)]">{lead.owner?.username}</td>
                 <td>
-                  {lead.status !== "converted" ? (
-                    <Button variant="ghost" disabled={busy} onClick={() => convertLead(lead.id)}>
-                      Convert
-                    </Button>
-                  ) : (
-                    <span className="text-xs text-[var(--muted)]">Converted</span>
-                  )}
+                  <div className="flex flex-wrap gap-1">
+                    <Link href={`/leads/${lead.id}`}>
+                      <Button variant="ghost">Open</Button>
+                    </Link>
+                    {lead.status !== "converted" ? (
+                      <Button variant="ghost" disabled={busy} onClick={() => convertLead(lead.id)}>
+                        Convert
+                      </Button>
+                    ) : (
+                      <span className="text-xs text-[var(--muted)]">Converted</span>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}

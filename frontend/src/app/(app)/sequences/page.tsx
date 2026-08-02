@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Badge, Button, Card, Empty, Input, PageHeader, Select, Textarea } from "@/components/ui";
 import { api, apiList } from "@/lib/api";
@@ -13,13 +14,14 @@ export default function SequencesPage() {
   const [sequences, setSequences] = useState<Sequence[]>([]);
   const [enrollments, setEnrollments] = useState<SequenceEnrollment[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [selectedSeq, setSelectedSeq] = useState<number | "">("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [job, setJob] = useState<JobRun | null>(null);
 
   const [tplForm, setTplForm] = useState({ name: "", subject: "", body: "" });
-  const [seqName, setSeqName] = useState("");
-  const [stepForm, setStepForm] = useState({ sequence: "", template: "", delay_days: "0" });
+  const [seqForm, setSeqForm] = useState({ name: "", description: "" });
+  const [stepForm, setStepForm] = useState({ template: "", delay_days: "0" });
   const [enrollForm, setEnrollForm] = useState({ sequence: "", lead: "" });
 
   async function load() {
@@ -34,6 +36,7 @@ export default function SequencesPage() {
       setSequences(s);
       setEnrollments(e);
       setLeads(l.filter((lead) => lead.status !== "converted"));
+      if (!selectedSeq && s.length) setSelectedSeq(s[0].id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load");
     }
@@ -42,6 +45,8 @@ export default function SequencesPage() {
   useEffect(() => {
     load();
   }, []);
+
+  const activeSequence = sequences.find((s) => s.id === selectedSeq) || null;
 
   async function createTemplate(e: React.FormEvent) {
     e.preventDefault();
@@ -58,17 +63,30 @@ export default function SequencesPage() {
     }
   }
 
+  async function deleteTemplate(id: number) {
+    setBusy(true);
+    try {
+      await api(`/api/email-templates/${id}/`, { method: "DELETE" });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Delete failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function createSequence(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError("");
     try {
-      await api("/api/sequences/", {
+      const s = await api<Sequence>("/api/sequences/", {
         method: "POST",
-        body: JSON.stringify({ name: seqName, is_active: true }),
+        body: JSON.stringify({ name: seqForm.name, description: seqForm.description, is_active: true }),
       });
-      setSeqName("");
+      setSeqForm({ name: "", description: "" });
       await load();
+      setSelectedSeq(s.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sequence create failed");
     } finally {
@@ -78,20 +96,35 @@ export default function SequencesPage() {
 
   async function addStep(e: React.FormEvent) {
     e.preventDefault();
-    if (!stepForm.sequence) return;
+    if (!selectedSeq) return;
     setBusy(true);
     setError("");
     try {
-      await api(`/api/sequences/${stepForm.sequence}/steps/`, {
+      await api(`/api/sequences/${selectedSeq}/steps/`, {
         method: "POST",
         body: JSON.stringify({
           template: Number(stepForm.template),
           delay_days: Number(stepForm.delay_days) || 0,
+          step_type: "email",
         }),
       });
+      setStepForm({ template: "", delay_days: "0" });
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Add step failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeStep(stepId: number) {
+    if (!selectedSeq) return;
+    setBusy(true);
+    try {
+      await api(`/api/sequences/${selectedSeq}/steps/${stepId}/`, { method: "DELETE" });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Remove step failed");
     } finally {
       setBusy(false);
     }
@@ -117,6 +150,21 @@ export default function SequencesPage() {
     }
   }
 
+  async function cancelEnrollment(id: number) {
+    setBusy(true);
+    try {
+      await api(`/api/sequence-enrollments/${id}/cancel/`, {
+        method: "POST",
+        body: JSON.stringify({ reason: "Cancelled from UI" }),
+      });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Cancel failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function advanceNow() {
     setBusy(true);
     setError("");
@@ -135,7 +183,7 @@ export default function SequencesPage() {
     <div>
       <PageHeader
         title="Sequences"
-        subtitle="Email cadences that deliver to the lead via Celery (console/SMTP) with open/click tracking."
+        subtitle="Email cadence: templates → ordered steps → enroll leads. Celery worker/beat sends mail and tracks opens/clicks. Sequences do not create CRM tasks."
         actions={
           user?.role === "MANAGER" ? (
             <Button disabled={busy} onClick={advanceNow}>
@@ -150,12 +198,15 @@ export default function SequencesPage() {
           <p className="text-sm">
             Job #{job.id} · {job.type} · <strong>{job.status}</strong> — {job.message}
           </p>
+          <p className="mt-1 text-xs text-[var(--muted)]">
+            If status stays pending, start Celery worker + beat.
+          </p>
         </Card>
       ) : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
-          <h2 className="font-[family-name:var(--font-display)] text-lg">Templates</h2>
+          <h2 className="font-[family-name:var(--font-display)] text-lg">1. Templates</h2>
           <form className="mt-3 grid gap-2" onSubmit={createTemplate}>
             <Input
               placeholder="Name"
@@ -182,9 +233,14 @@ export default function SequencesPage() {
           </form>
           <div className="mt-4 space-y-2">
             {templates.map((t) => (
-              <div key={t.id} className="rounded-lg border border-[var(--line)] p-3">
-                <p className="font-medium">{t.name}</p>
-                <p className="text-sm text-[var(--muted)]">{t.subject}</p>
+              <div key={t.id} className="flex items-start justify-between gap-2 rounded-lg border border-[var(--line)] p-3">
+                <div>
+                  <p className="font-medium">{t.name}</p>
+                  <p className="text-sm text-[var(--muted)]">{t.subject}</p>
+                </div>
+                <Button variant="ghost" disabled={busy} onClick={() => deleteTemplate(t.id)}>
+                  Delete
+                </Button>
               </div>
             ))}
             {templates.length === 0 ? <Empty>No templates yet.</Empty> : null}
@@ -192,77 +248,97 @@ export default function SequencesPage() {
         </Card>
 
         <Card>
-          <h2 className="font-[family-name:var(--font-display)] text-lg">Sequences</h2>
-          <form className="mt-3 flex gap-2" onSubmit={createSequence}>
+          <h2 className="font-[family-name:var(--font-display)] text-lg">2. Sequences</h2>
+          <form className="mt-3 grid gap-2" onSubmit={createSequence}>
             <Input
               placeholder="Sequence name"
-              value={seqName}
-              onChange={(e) => setSeqName(e.target.value)}
+              value={seqForm.name}
+              onChange={(e) => setSeqForm({ ...seqForm, name: e.target.value })}
               required
+            />
+            <Textarea
+              rows={2}
+              placeholder="What this cadence does"
+              value={seqForm.description}
+              onChange={(e) => setSeqForm({ ...seqForm, description: e.target.value })}
             />
             <Button type="submit" disabled={busy}>
-              Create
+              Create sequence
             </Button>
           </form>
-          <form className="mt-3 grid gap-2" onSubmit={addStep}>
+          <div className="mt-3">
             <Select
-              value={stepForm.sequence}
-              onChange={(e) => setStepForm({ ...stepForm, sequence: e.target.value })}
-              required
+              value={selectedSeq}
+              onChange={(e) => setSelectedSeq(e.target.value ? Number(e.target.value) : "")}
             >
-              <option value="">Sequence…</option>
+              <option value="">Pick sequence…</option>
               {sequences.map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.name}
+                  {s.name} ({s.step_count} steps)
                 </option>
               ))}
             </Select>
-            <Select
-              value={stepForm.template}
-              onChange={(e) => setStepForm({ ...stepForm, template: e.target.value })}
-              required
-            >
-              <option value="">Template…</option>
-              {templates.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-            </Select>
-            <Input
-              type="number"
-              min={0}
-              placeholder="Delay days before this step"
-              value={stepForm.delay_days}
-              onChange={(e) => setStepForm({ ...stepForm, delay_days: e.target.value })}
-            />
-            <Button type="submit" disabled={busy} variant="ghost">
-              Add step
-            </Button>
-          </form>
-          <div className="mt-4 space-y-3">
-            {sequences.map((s) => (
-              <div key={s.id} className="rounded-lg border border-[var(--line)] p-3">
-                <div className="flex items-center gap-2">
-                  <p className="font-medium">{s.name}</p>
-                  <Badge tone={s.is_active ? "ok" : "neutral"}>{s.is_active ? "active" : "off"}</Badge>
-                  <Badge>{s.step_count} steps</Badge>
-                </div>
-                <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-[var(--muted)]">
-                  {s.steps.map((st) => (
-                    <li key={st.id}>
-                      Day +{st.delay_days}: {st.template_subject}
-                    </li>
-                  ))}
-                </ol>
-              </div>
-            ))}
-            {sequences.length === 0 ? <Empty>No sequences yet.</Empty> : null}
           </div>
+          {activeSequence ? (
+            <div className="mt-4 rounded-lg border border-[var(--line)] p-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="font-medium">{activeSequence.name}</p>
+                <Badge tone={activeSequence.is_active ? "ok" : "neutral"}>
+                  {activeSequence.is_active ? "active" : "off"}
+                </Badge>
+                <Badge>{activeSequence.enrollment_count ?? 0} enrolled</Badge>
+              </div>
+              {activeSequence.description ? (
+                <p className="mt-1 text-sm text-[var(--muted)]">{activeSequence.description}</p>
+              ) : null}
+              <ol className="mt-3 space-y-2">
+                {activeSequence.steps.map((st) => (
+                  <li
+                    key={st.id}
+                    className="flex items-center justify-between gap-2 rounded border border-[var(--line)] px-2 py-1.5 text-sm"
+                  >
+                    <span>
+                      Step {st.order} · +{st.delay_days}d · {st.step_type}: {st.template_subject}
+                    </span>
+                    <Button variant="ghost" disabled={busy} onClick={() => removeStep(st.id)}>
+                      Remove
+                    </Button>
+                  </li>
+                ))}
+              </ol>
+              <form className="mt-3 grid gap-2" onSubmit={addStep}>
+                <Select
+                  value={stepForm.template}
+                  onChange={(e) => setStepForm({ ...stepForm, template: e.target.value })}
+                  required
+                >
+                  <option value="">Template…</option>
+                  {templates.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </Select>
+                <Input
+                  type="number"
+                  min={0}
+                  placeholder="Delay days"
+                  value={stepForm.delay_days}
+                  onChange={(e) => setStepForm({ ...stepForm, delay_days: e.target.value })}
+                />
+                <Button type="submit" disabled={busy} variant="ghost">
+                  Add email step
+                </Button>
+              </form>
+            </div>
+          ) : null}
         </Card>
 
         <Card className="lg:col-span-2">
-          <h2 className="font-[family-name:var(--font-display)] text-lg">Enrollments</h2>
+          <h2 className="font-[family-name:var(--font-display)] text-lg">3. Enrollments</h2>
+          <p className="mt-1 text-xs text-[var(--muted)]">
+            Prefer enrolling from a lead detail page. Open/click counts come from related EmailMessage rows.
+          </p>
           <form className="mt-3 grid gap-2 sm:grid-cols-3" onSubmit={enroll}>
             <Select
               value={enrollForm.sequence}
@@ -301,25 +377,42 @@ export default function SequencesPage() {
                   <th>Status</th>
                   <th>Step</th>
                   <th>Next run</th>
-                  <th>Message</th>
+                  <th>Tracking</th>
+                  <th />
                 </tr>
               </thead>
               <tbody>
-                {enrollments.map((en) => (
-                  <tr key={en.id} className="border-t border-[var(--line)]">
-                    <td className="py-2">
-                      {en.lead_name}
-                      <span className="block text-xs text-[var(--muted)]">{en.lead_company}</span>
-                    </td>
-                    <td>{en.sequence_name}</td>
-                    <td>
-                      <Badge tone={en.status === "active" ? "ok" : "neutral"}>{en.status}</Badge>
-                    </td>
-                    <td>{en.current_step_order}</td>
-                    <td>{en.next_run_at ? formatDateTime(en.next_run_at) : "—"}</td>
-                    <td className="text-[var(--muted)]">{en.last_message}</td>
-                  </tr>
-                ))}
+                {enrollments.map((en) => {
+                  const opens = (en.recent_messages || []).reduce((n, m) => n + (m.open_count || 0), 0);
+                  const clicks = (en.recent_messages || []).reduce((n, m) => n + (m.click_count || 0), 0);
+                  return (
+                    <tr key={en.id} className="border-t border-[var(--line)]">
+                      <td className="py-2">
+                        <Link href={`/leads/${en.lead}`} className="text-[var(--cyan)] hover:underline">
+                          {en.lead_name}
+                        </Link>
+                        <span className="block text-xs text-[var(--muted)]">{en.lead_company}</span>
+                      </td>
+                      <td>{en.sequence_name}</td>
+                      <td>
+                        <Badge tone={en.status === "active" ? "ok" : "neutral"}>{en.status}</Badge>
+                      </td>
+                      <td>{en.current_step_order}</td>
+                      <td>{en.next_run_at ? formatDateTime(en.next_run_at) : "—"}</td>
+                      <td className="text-xs text-[var(--muted)]">
+                        {opens} opens · {clicks} clicks
+                        <div>{en.last_message}</div>
+                      </td>
+                      <td>
+                        {en.status === "active" ? (
+                          <Button variant="ghost" disabled={busy} onClick={() => cancelEnrollment(en.id)}>
+                            Cancel
+                          </Button>
+                        ) : null}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
             {enrollments.length === 0 ? <Empty>No enrollments yet.</Empty> : null}

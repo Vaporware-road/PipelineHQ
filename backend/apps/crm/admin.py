@@ -6,6 +6,7 @@ from .models import (
     AiSuggestion,
     AuditEvent,
     AvailabilitySlot,
+    Comment,
     Contact,
     CustomFieldDefinition,
     CustomFieldValue,
@@ -32,8 +33,8 @@ from .models import (
 
 @admin.register(Lead)
 class LeadAdmin(admin.ModelAdmin):
-    list_display = ("name", "company", "status", "source", "score", "owner", "created_at")
-    list_filter = ("status", "source", "owner")
+    list_display = ("name", "company", "status", "priority", "budget_amount", "source", "score", "owner", "created_at")
+    list_filter = ("status", "priority", "source", "owner")
     search_fields = ("name", "email", "company")
 
 
@@ -133,10 +134,16 @@ class DealCommentAdmin(admin.ModelAdmin):
     search_fields = ("body", "author__username", "opportunity__name")
 
 
+@admin.register(Comment)
+class CommentAdmin(admin.ModelAdmin):
+    list_display = ("author", "opportunity", "lead", "task", "meeting", "created_at")
+    search_fields = ("body", "author__username")
+
+
 @admin.register(Task)
 class TaskAdmin(admin.ModelAdmin):
-    list_display = ("title", "owner", "due_at", "completed", "lead", "opportunity")
-    list_filter = ("completed",)
+    list_display = ("title", "owner", "created_by", "status", "priority", "due_at", "completed", "lead", "opportunity")
+    list_filter = ("completed", "status", "priority")
 
 
 @admin.register(TimelineEvent)
@@ -177,8 +184,8 @@ class AvailabilitySlotAdmin(admin.ModelAdmin):
 
 @admin.register(Meeting)
 class MeetingAdmin(admin.ModelAdmin):
-    list_display = ("title", "host", "starts_at", "invitee_name", "status")
-    list_filter = ("status",)
+    list_display = ("title", "host", "starts_at", "invitee_name", "target_role", "status")
+    list_filter = ("status", "target_role")
 
 
 class SequenceStepInline(admin.TabularInline):
