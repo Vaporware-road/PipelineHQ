@@ -2,7 +2,7 @@
 
 **B2B sales CRM for SaaS teams** — capture leads, run deals, hit forecast.
 
-A multi-role Salesforce-lite workspace for SDR, AE, and Sales Manager. Built as a full-stack portfolio product: Django REST + Celery on Postgres/Redis, and a dark synthwave Next.js client.
+A multi-role Salesforce-lite workspace for Sales Development, Account Executive, and Sales Manager. Built as a full-stack portfolio product: Django REST + Celery on Postgres/Redis, and a dark synthwave Next.js client.
 
 [Learning guide](./LEARNING.md) · [About Vaporware-Road](./frontend/src/app/about/page.tsx)
 
@@ -14,9 +14,9 @@ Hiring managers recognize the classic CRM object model. PipelineHQ shows you can
 
 | Role | Job to be done |
 |------|----------------|
-| **SDR** | Own leads, qualify, convert → Account + Contact + Opportunity |
-| **AE** | Run pipeline, log activity, fill MEDDIC, close with win/loss reasons |
-| **Manager** | Forecast, route leads, advance sequences, export reports, reset demo |
+| **Sales Development** | Own leads, qualify, convert → Account + Contact + Opportunity |
+| **Account Executive** | Run pipeline, log activity, fill MEDDIC, close with win/loss reasons |
+| **Sales Manager** | Admin hub (team/roles, routing, ops), forecast, export reports |
 
 ---
 
@@ -41,10 +41,11 @@ Hiring managers recognize the classic CRM object model. PipelineHQ shows you can
 - **Deal comments** with `@username` mentions → in-app alerts  
 - **Tasks** (deal/lead/sequence-driven) + overdue notifications  
 - **Global search** (⌘K / Ctrl+K)  
-- **Lead routing** (round-robin SDRs)  
+- **Lead routing** (round-robin Sales Development)  
 - **Email sequences** (templates + enrollments + Beat advance)  
 - **Analytics & Reports** (date-ranged KPIs, funnel, activity, CSV export)  
-- **Manager Settings** — routing toggles + one-click demo reset  
+- **Profile** — self-service identity, password, workspace counts  
+- **Admin hub** — team/roles, routing toggles, ops jobs, job glance  
 - **Synthwave UI** — neon chrome, expressive type, About branding page  
 
 ---
@@ -96,20 +97,20 @@ Services: `db`, `redis`, `web`, `worker`, `beat`, `frontend`.
 
 Password for all seeded users: `demo1234`
 
-| Username  | Role    |
-|-----------|---------|
-| `sdr`     | SDR     |
-| `ae`      | AE      |
-| `ae2`     | AE      |
-| `manager` | Manager |
+| Username  | Role               |
+|-----------|--------------------|
+| `sdr`     | Sales Development  |
+| `ae`      | Account Executive  |
+| `ae2`     | Account Executive  |
+| `manager` | Sales Manager      |
 
 Or use the one-click **Demo access** buttons on the login page.
 
 ### Suggested walkthrough
 
-1. **SDR** — create/convert a lead; check **Tasks** and the **Alerts** bell; use lead filters.  
-2. **AE** — ⌘K search → **Pipeline** → try Proposal without MEDDIC (blocked) → open deal → fill checklist → comment `@manager` → close with a reason.  
-3. **Manager** — **Settings** (routing / reset demo) → **Sequences** (advance due steps) → **Reports** + **Forecast** → watch **Jobs**.
+1. **Sales Development** — create/convert a lead; open **Profile** (workspace counts); check **Tasks** and the **Alerts** bell.  
+2. **Account Executive** — ⌘K search → **Pipeline** → try Proposal without MEDDIC (blocked) → open deal → fill checklist → comment `@manager` → close with a reason.  
+3. **Sales Manager** — **Profile** → **Admin** (Team / Routing / Operations / Jobs) → **Sequences** (advance due steps) → **Reports** + **Forecast** → watch **Jobs**.
 
 Seed includes MEDDIC-filled deals, comments with mentions, open/overdue tasks, one sequence enrollment, and sample notifications.
 
@@ -139,9 +140,12 @@ HTTP stays fast; imports, exports, emails, sequence advances, stale scans, and d
 | Method | Path | Notes |
 |--------|------|--------|
 | POST | `/api/auth/token/` | JWT username/password |
-| POST | `/api/auth/demo-login/` | `{ "role": "SDR\|AE\|MANAGER" }` |
-| GET | `/api/auth/me/` | Current user |
-| GET | `/api/auth/team/` | Users for filter dropdowns |
+| POST | `/api/auth/demo-login/` | `{ "role": "SDR\|AE\|MANAGER" }` (codes; UI shows professional labels) |
+| GET/PATCH | `/api/auth/me/` | Current user / self profile update |
+| POST | `/api/auth/change-password/` | Self password change |
+| GET | `/api/auth/me/summary/` | Personal workspace counts |
+| GET | `/api/auth/team/` | Active users for filter dropdowns |
+| CRUD | `/api/auth/users/` | Sales Manager team admin (list includes inactive) |
 | GET | `/api/search/?q=` | Global search |
 | CRUD | `/api/leads/` | Convert, CSV import, multi-filters |
 | CRUD | `/api/accounts/`, `/api/contacts/` | |

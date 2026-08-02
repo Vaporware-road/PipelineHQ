@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Badge, Button, Card, Empty, PageHeader } from "@/components/ui";
 import { apiList } from "@/lib/api";
+import { formatDateTime } from "@/lib/format";
 import type { JobRun } from "@/lib/types";
 
 export default function JobsPage() {
@@ -73,7 +74,7 @@ export default function JobsPage() {
                     "—"
                   )}
                 </td>
-                <td className="text-xs">{new Date(job.created_at).toLocaleString()}</td>
+                <td className="text-xs">{formatDateTime(job.created_at)}</td>
               </tr>
             ))}
           </tbody>

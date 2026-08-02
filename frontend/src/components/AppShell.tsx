@@ -7,6 +7,7 @@ import { BrandMark, SiteFooter } from "@/components/Brand";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { NotificationBell } from "@/components/NotificationBell";
 import { useAuth } from "@/lib/auth";
+import { roleLabel } from "@/lib/roles";
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard" },
@@ -18,7 +19,7 @@ const NAV = [
   { href: "/forecast", label: "Forecast" },
   { href: "/reports", label: "Reports" },
   { href: "/jobs", label: "Jobs" },
-  { href: "/settings", label: "Settings", managerOnly: true },
+  { href: "/admin", label: "Admin", managerOnly: true },
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -80,13 +81,17 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="flex items-center gap-2.5 text-sm sm:gap-3">
             <GlobalSearch />
             <NotificationBell />
-            <span className="hidden items-center gap-1.5 border-l border-[var(--line)] pl-3 sm:inline-flex">
-              <span className="text-[var(--muted)]">{user.first_name || user.username}</span>
-              <span className="text-[var(--line)]">·</span>
-              <span className="rounded border border-[rgba(0,229,255,0.28)] bg-[rgba(0,229,255,0.08)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--cyan)]">
-                {user.role}
+            <Link
+              href="/profile"
+              className="inline-flex max-w-[9.5rem] items-center gap-1.5 border-l border-[var(--line)] pl-2.5 transition hover:opacity-90 sm:max-w-none sm:pl-3"
+              title="Open profile"
+            >
+              <span className="truncate text-[var(--muted)]">{user.first_name || user.username}</span>
+              <span className="hidden text-[var(--line)] sm:inline">·</span>
+              <span className="hidden rounded border border-[rgba(0,229,255,0.28)] bg-[rgba(0,229,255,0.08)] px-1.5 py-0.5 text-[10px] font-semibold tracking-[0.04em] text-[var(--cyan)] sm:inline">
+                {roleLabel(user.role)}
               </span>
-            </span>
+            </Link>
             <button
               type="button"
               onClick={() => {

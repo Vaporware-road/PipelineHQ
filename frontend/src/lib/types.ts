@@ -7,6 +7,16 @@ export type User = {
   first_name: string;
   last_name: string;
   role: Role;
+  title: string;
+  phone: string;
+  is_active?: boolean;
+};
+
+export type MeSummary = {
+  open_leads: number;
+  open_opportunities: number;
+  open_tasks: number;
+  unread_notifications: number;
 };
 
 export type Lead = {

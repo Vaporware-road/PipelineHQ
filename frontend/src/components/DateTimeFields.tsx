@@ -20,13 +20,9 @@ function pad(n: number) {
 
 function parseParts(value: string) {
   const { date, time } = splitDateTime(value);
-  const now = new Date();
-  const [y, m, d] = date
-    ? date.split("-").map(Number)
-    : [now.getFullYear(), now.getMonth() + 1, now.getDate()];
-  const [hh, mm] = time
-    ? time.split(":").map(Number)
-    : [now.getHours(), Math.floor(now.getMinutes() / 5) * 5];
+  // Stable defaults (not `new Date()`) so SSR and client initial state match.
+  const [y, m, d] = date ? date.split("-").map(Number) : [2000, 1, 1];
+  const [hh, mm] = time ? time.split(":").map(Number) : [9, 0];
   return {
     year: y,
     month: m,
@@ -45,7 +41,7 @@ function formatTrigger(value: string) {
   if (!value) return "Set due date & time";
   const dt = new Date(value);
   if (Number.isNaN(dt.getTime())) return "Set due date & time";
-  return dt.toLocaleString(undefined, {
+  return dt.toLocaleString("en-US", {
     weekday: "short",
     month: "short",
     day: "numeric",
@@ -94,13 +90,24 @@ export function DateTimeFields({
 
   useEffect(() => {
     if (!open) return;
-    const parts = parseParts(value || draft);
-    setDraft(
-      value ||
-        toValue(parts.year, parts.month, parts.day, parts.hour24, parts.minute),
-    );
-    setViewYear(parts.year);
-    setViewMonth(parts.month);
+    if (value) {
+      const parts = parseParts(value);
+      setDraft(value);
+      setViewYear(parts.year);
+      setViewMonth(parts.month);
+    } else {
+      const n = new Date();
+      const next = toValue(
+        n.getFullYear(),
+        n.getMonth() + 1,
+        n.getDate(),
+        n.getHours(),
+        Math.floor(n.getMinutes() / 5) * 5,
+      );
+      setDraft(next);
+      setViewYear(n.getFullYear());
+      setViewMonth(n.getMonth() + 1);
+    }
     setClockMode("hour");
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 

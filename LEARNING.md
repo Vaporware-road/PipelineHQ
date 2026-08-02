@@ -60,7 +60,7 @@ Untitled/
 | `urls.py` | Routes `/api/...` and Django admin |
 | `celery.py` | Creates Celery app; `autodiscover_tasks()` finds `@shared_task` |
 
-**Custom user:** `AUTH_USER_MODEL = "accounts.User"` with a `role` field (`SDR`, `AE`, `MANAGER`).
+**Custom user:** `AUTH_USER_MODEL = "accounts.User"` with a `role` field (`SDR` / `AE` / `MANAGER` codes; UI labels are Sales Development, Account Executive, Sales Manager). Profile fields include `title` and `phone`.
 
 ### 3.2 CRM domain model (`apps/crm/models.py`)
 
@@ -95,7 +95,7 @@ That atomicity is an important interview talking point.
 - **Serializers** validate input and shape JSON output.
 - **Permissions** (`RoleScopedAccess`, `IsManager`, …):
   - Managers see team-wide data
-  - SDR/AE mostly see records they own
+  - Sales Development / Account Executive mostly see records they own
 - **Filters**: `django-filter` + search/ordering on list endpoints.
 
 Important custom actions:
@@ -118,7 +118,7 @@ Important custom actions:
 ### 3.4 Automation (`automation.py`)
 
 - **MEDDIC stage gates** — Proposal needs `champion` + `identify_pain`; Negotiation also needs `economic_buyer`; closed won/lost need reasons.
-- **Lead routing** — on create without owner, round-robin SDRs and notify assignee.
+- **Lead routing** — on create without owner, round-robin Sales Development reps and notify assignee.
 - **Mentions** — `notify_comment_mentions()` parses `@username` in `DealComment.body`.
 
 ### 3.5 Celery tasks (`apps/crm/tasks.py`)
@@ -129,11 +129,11 @@ Important custom actions:
 | `crm.import_leads_csv` | CSV import endpoint | Creates leads in bulk |
 | `crm.export_forecast_csv` | Manager export | Writes CSV to `media/exports/` |
 | `crm.export_analytics_csv` | Reports export | Analytics CSV via Celery |
-| `crm.flag_stale_deals` | Beat hourly + Manager button | Sets `Opportunity.is_stale` |
-| `crm.warm_dashboard_cache` | Beat nightly + Manager button | Precomputes KPI payloads |
-| `crm.advance_sequence_enrollments` | Beat + Manager button | Creates tasks + notifications for due steps |
+| `crm.flag_stale_deals` | Beat hourly + Admin → Operations | Sets `Opportunity.is_stale` |
+| `crm.warm_dashboard_cache` | Beat nightly + Admin → Operations | Precomputes KPI payloads |
+| `crm.advance_sequence_enrollments` | Beat + Admin / Sequences | Creates tasks + notifications for due steps |
 | `crm.notify_overdue_tasks` | Beat hourly | Notifies owners of overdue incomplete tasks |
-| `crm.reset_demo_data` | Manager Settings | Re-runs `seed_demo --reset` |
+| `crm.reset_demo_data` | Admin → Operations | Re-runs `seed_demo --reset` |
 
 **Beat schedules** are stored in DB via `django-celery-beat` (`setup_periodic_tasks` command).
 
@@ -182,10 +182,12 @@ Central `api()` helper:
 | `/tasks` | Mine / overdue / all; complete toggles |
 | `/accounts` | Accounts & contacts tables |
 | `/sequences` | Templates, sequences, enrollments, advance due steps |
-| `/forecast` | Rollups + manager ops |
+| `/forecast` | Rollups + CSV export (manager) |
 | `/reports` | Funnel + activity + CSV export |
 | `/jobs` | Poll Celery `JobRun` rows |
-| `/settings` | Manager: lead routing + **reset demo** |
+| `/profile` | Self-service identity, password, workspace counts |
+| `/admin` | Sales Manager hub: Team / Routing / Operations / Jobs |
+| `/settings` | Redirects to `/admin` |
 
 `AppShell` is the responsive chrome (mobile menu + desktop nav + **Cmd/Ctrl+K search** + Alerts bell).
 
@@ -264,7 +266,7 @@ Celery Beat (hourly) OR Manager "Run stale scan"
 - Why conversion is a **transaction**  
 - Why Celery exists (request latency, retries, scheduling)  
 - Difference between **broker** (Redis) and **result backend** (`django-db`)  
-- How **RBAC** differs for SDR vs AE vs Manager  
+- How **RBAC** differs for Sales Development vs Account Executive vs Sales Manager (codes stay `SDR` / `AE` / `MANAGER`)  
 - How **MEDDIC gates** encode sales process in the API (not only the UI)  
 - How Redis caching interacts with invalidation on writes  
 - Why JWT on a SPA + CORS configuration is required  

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { api, apiList } from "@/lib/api";
+import { formatDateTime } from "@/lib/format";
 import type { NotificationItem } from "@/lib/types";
 
 export function NotificationBell() {
@@ -95,7 +96,7 @@ export function NotificationBell() {
                   </div>
                   {n.body ? <p className="mt-0.5 text-xs text-[var(--muted)]">{n.body}</p> : null}
                   <p className="mt-1 text-[10px] uppercase tracking-wide text-[var(--muted)]">
-                    {n.kind} · {new Date(n.created_at).toLocaleString()}
+                    {n.kind} · {formatDateTime(n.created_at)}
                   </p>
                 </Link>
               ))

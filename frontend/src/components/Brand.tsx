@@ -1,3 +1,5 @@
+"use client";
+
 import Link from "next/link";
 
 const GITHUB_ORG = "https://github.com/Vaporware-road";
@@ -22,19 +24,19 @@ export function SiteFooter({ className = "" }: { className?: string }) {
     <footer
       className={`mt-auto border-t border-[var(--line)] px-4 py-6 text-center sm:px-6 ${className}`}
     >
-      <section className="mx-auto max-w-xl">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[var(--cyan)]">
+      <div className="mx-auto max-w-xl">
+        <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[var(--cyan)]">
           About us
-        </p>
+        </div>
         <Link
           href="/about"
           className="mt-3 inline-block font-[family-name:var(--font-display)] text-xs tracking-[0.14em] text-[var(--accent)] transition hover:text-[var(--cyan)] hover:drop-shadow-[0_0_10px_rgba(0,229,255,0.45)]"
         >
           Enter the Vaporware-Road signal →
         </Link>
-      </section>
+      </div>
 
-      <p className="mt-5 text-xs tracking-[0.06em] text-[var(--muted)]">
+      <div className="mt-5 text-xs tracking-[0.06em] text-[var(--muted)]">
         <span className="text-[var(--ink)]">Vaporware</span>
         {" product by "}
         <a
@@ -45,7 +47,7 @@ export function SiteFooter({ className = "" }: { className?: string }) {
         >
           Vaporware-road
         </a>
-      </p>
+      </div>
     </footer>
   );
 }

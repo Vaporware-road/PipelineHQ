@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Badge, Button, Card, Empty, PageHeader } from "@/components/ui";
 import { api, apiList } from "@/lib/api";
+import { formatDateTime } from "@/lib/format";
 import type { CrmTask } from "@/lib/types";
 
 export default function TasksPage() {
@@ -118,7 +119,7 @@ function TaskRow({
             <p className="mt-1 text-sm text-[var(--muted)]">{task.description}</p>
           ) : null}
           <p className="mt-2 text-xs text-[var(--muted)]">
-            {task.due_at ? `Due ${new Date(task.due_at).toLocaleString()}` : "No due date"}
+            {task.due_at ? `Due ${formatDateTime(task.due_at)}` : "No due date"}
             {task.opportunity ? (
               <>
                 {" · "}

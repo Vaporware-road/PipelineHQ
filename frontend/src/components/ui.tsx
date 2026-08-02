@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { formatMoney } from "@/lib/format";
 
 export function PageHeader({
   title,
@@ -85,8 +86,7 @@ export function Badge({ children, tone = "neutral" }: { children: ReactNode; ton
 }
 
 export function Money({ value }: { value: string | number }) {
-  const n = typeof value === "string" ? Number(value) : value;
-  return <span className="tabular-nums text-[var(--cyan)]">${Number.isFinite(n) ? n.toLocaleString() : value}</span>;
+  return <span className="tabular-nums text-[var(--cyan)]">${formatMoney(value)}</span>;
 }
 
 export function Empty({ children }: { children: ReactNode }) {

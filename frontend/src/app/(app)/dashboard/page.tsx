@@ -7,6 +7,7 @@ import { Badge, Card, Empty, Money, PageHeader } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { defaultRange, qs, type DateRange } from "@/lib/dateRange";
+import { roleLabel } from "@/lib/roles";
 import type { AnalyticsFunnel, AnalyticsOverview, Dashboard } from "@/lib/types";
 
 export default function DashboardPage() {
@@ -63,7 +64,7 @@ export default function DashboardPage() {
         title="Dashboard"
         subtitle={
           user
-            ? `Scoped to your ${user.role} view · live KPIs + date-range analytics (Redis-cached)`
+            ? `Scoped to your ${roleLabel(user.role)} view · live KPIs + date-range analytics (Redis-cached)`
             : undefined
         }
         actions={<DateRangePicker value={range} onChange={setRange} />}

@@ -5,13 +5,10 @@ import { useEffect, useState } from "react";
 import { BrandMark, SiteFooter } from "@/components/Brand";
 import { Button, Card, Input } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
+import { ROLE_BLURBS, ROLE_LABELS } from "@/lib/roles";
 import type { Role } from "@/lib/types";
 
-const DEMOS: { role: Role; label: string; blurb: string }[] = [
-  { role: "SDR", label: "Log in as SDR", blurb: "Qualify leads and convert to deals" },
-  { role: "AE", label: "Log in as AE", blurb: "Own pipeline and log activities" },
-  { role: "MANAGER", label: "Log in as Manager", blurb: "Forecast, ops jobs, team view" },
-];
+const DEMO_ROLES: Role[] = ["SDR", "AE", "MANAGER"];
 
 export default function LoginPage() {
   const { user, loading, demoLogin, loginWithPassword } = useAuth();
@@ -61,23 +58,23 @@ export default function LoginPage() {
               Seeded password: <span className="text-[var(--cyan)]">demo1234</span>
             </p>
             <div className="mt-4 grid gap-2">
-              {DEMOS.map((d) => (
+              {DEMO_ROLES.map((role) => (
                 <button
-                  key={d.role}
+                  key={role}
                   type="button"
                   disabled={busy}
-                  onClick={() => run(() => demoLogin(d.role))}
+                  onClick={() => run(() => demoLogin(role))}
                   className="group rounded-lg border border-[var(--line)] bg-[var(--input)] px-3 py-3 text-left transition hover:border-[var(--accent)] hover:bg-[var(--accent-soft)] hover:shadow-[0_0_20px_rgba(255,43,214,0.2)] disabled:opacity-50"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-sm font-semibold text-[var(--ink)] group-hover:text-[var(--accent-ink)]">
-                      {d.label}
+                      {busy ? "Signing in…" : `Log in as ${ROLE_LABELS[role]}`}
                     </span>
-                    <span className="rounded border border-[rgba(0,229,255,0.25)] px-1.5 py-0.5 text-[10px] uppercase tracking-[0.14em] text-[var(--cyan)]">
-                      {d.role}
+                    <span className="rounded border border-[rgba(0,229,255,0.25)] px-1.5 py-0.5 text-[10px] tracking-[0.04em] text-[var(--cyan)]">
+                      {ROLE_LABELS[role]}
                     </span>
                   </div>
-                  <div className="mt-1 text-xs text-[var(--muted)]">{d.blurb}</div>
+                  <div className="mt-1 text-xs text-[var(--muted)]">{ROLE_BLURBS[role]}</div>
                 </button>
               ))}
             </div>
@@ -102,7 +99,7 @@ export default function LoginPage() {
               />
               {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
               <Button type="submit" disabled={busy} className="w-full tracking-[0.08em] uppercase">
-                Sign in
+                {busy ? "Signing in…" : "Sign in"}
               </Button>
             </form>
           </Card>

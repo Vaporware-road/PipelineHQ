@@ -71,13 +71,13 @@ class Command(BaseCommand):
 
     def _ensure_users(self):
         specs = [
-            ("sdr", User.Role.SDR, "Sam", "SDR", "sdr@pipelinehq.local"),
-            ("ae", User.Role.AE, "Ava", "AE", "ae@pipelinehq.local"),
-            ("ae2", User.Role.AE, "Alex", "AE", "ae2@pipelinehq.local"),
-            ("manager", User.Role.MANAGER, "Morgan", "Manager", "manager@pipelinehq.local"),
+            ("sdr", User.Role.SDR, "Sam", "Reed", "sdr@pipelinehq.local", "Sales Development"),
+            ("ae", User.Role.AE, "Ava", "Ellis", "ae@pipelinehq.local", "Account Executive"),
+            ("ae2", User.Role.AE, "Alex", "Ortiz", "ae2@pipelinehq.local", "Account Executive"),
+            ("manager", User.Role.MANAGER, "Morgan", "Hale", "manager@pipelinehq.local", "Sales Manager"),
         ]
         users = {}
-        for username, role, first, last, email in specs:
+        for username, role, first, last, email, title in specs:
             user, created = User.objects.get_or_create(
                 username=username,
                 defaults={
@@ -85,11 +85,15 @@ class Command(BaseCommand):
                     "first_name": first,
                     "last_name": last,
                     "email": email,
+                    "title": title,
                     "is_staff": role == User.Role.MANAGER,
                 },
             )
             user.role = role
+            user.first_name = first
+            user.last_name = last
             user.email = email
+            user.title = title
             user.set_password(DEMO_PASSWORD)
             user.save()
             users[username] = user
@@ -355,8 +359,8 @@ class Command(BaseCommand):
         Notification.objects.create(
             user=manager,
             title="Demo workspace ready",
-            body="Use Settings to toggle lead routing or reset demo data anytime.",
+            body="Use Admin to manage the team, toggle lead routing, or reset demo data anytime.",
             kind=Notification.Kind.OTHER,
-            link="/settings",
+            link="/admin",
         )
         self.stdout.write("Seeded email templates, sequence, enrollment, tasks, notifications.")
