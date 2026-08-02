@@ -173,13 +173,14 @@
 }
 
 .cal-day-lane {
-  flex: 0 0 auto;
-  min-width: 9.5rem;
+  flex-shrink: 0;
+  flex-grow: 0;
   max-width: none;
+  box-sizing: border-box;
 }
 
 .cal-day-lane--wide {
-  /* Width grows with extra event columns (2 events per column) */
+  /* flex-basis / width set inline from visible meeting count */
 }
 
 .cal-day-events {

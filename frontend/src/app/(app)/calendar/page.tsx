@@ -45,6 +45,17 @@ function targetRoleLabel(role: string): string {
   return roleLabel(role);
 }
 
+/** Blank target_role is treated as ALL for filter matching. */
+function meetingTargetRole(m: Meeting): string {
+  return m.target_role || "ALL";
+}
+
+function dayLaneWidth(count: number): string {
+  if (count <= 2) return "9.5rem";
+  const cols = Math.ceil(count / 2);
+  return `calc(${cols} * 9.5rem + ${(cols - 1) * 0.5}rem + 1.5rem)`;
+}
+
 function draftFromMeeting(m: Meeting): DetailDraft {
   return {
     title: m.title || "",
@@ -108,6 +119,21 @@ export default function CalendarPage() {
     [meetings, selectedId],
   );
 
+  /**
+   * Filter in the UI only. Never refetch on filter clicks — that raced and wiped
+   * the week list, which also broke day expand / horizontal scroll.
+   */
+  const visibleMeetings = useMemo(() => {
+    if (!isManager || view !== "role" || !roleFilter) return meetings;
+    if (roleFilter === "ALL") {
+      return meetings.filter((m) => meetingTargetRole(m) === "ALL");
+    }
+    return meetings.filter((m) => {
+      const role = meetingTargetRole(m);
+      return role === roleFilter || role === "ALL";
+    });
+  }, [meetings, isManager, view, roleFilter]);
+
   async function load(signal?: { cancelled: boolean }) {
     try {
       const params = new URLSearchParams({
@@ -115,16 +141,14 @@ export default function CalendarPage() {
         starts_at_after: anchor.toISOString(),
         starts_at_before: weekEnd.toISOString(),
       });
-      if (isManager && view === "role" && roleFilter) {
-        params.set("target_role", roleFilter);
-      }
+      // Full week always; role chips filter via visibleMeetings.
       const [m, s] = await Promise.all([
         apiList<Meeting>(`/api/meetings/?${params}`),
         apiList<AvailabilitySlot>("/api/availability/"),
       ]);
       if (signal?.cancelled) return;
-      setMeetings(m);
-      setSlots(s);
+      setMeetings(Array.isArray(m) ? m : []);
+      setSlots(Array.isArray(s) ? s : []);
       setError("");
     } catch (e) {
       if (signal?.cancelled) return;
@@ -138,8 +162,9 @@ export default function CalendarPage() {
     return () => {
       signal.cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- load closes over current filter state
-  }, [anchor, weekEnd, view, roleFilter, user?.id, isManager]);
+    // Do not depend on view / roleFilter — filters are client-side.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anchor, weekEnd, user?.id, isManager]);
 
   function setAllMeetingsView() {
     setView("all");
@@ -148,7 +173,7 @@ export default function CalendarPage() {
 
   function setByRoleView() {
     setView("role");
-    if (!roleFilter) setRoleFilter("SDR");
+    setRoleFilter((prev) => prev || "SDR");
   }
 
   async function cancelMeeting(meetingId: number) {
@@ -416,9 +441,9 @@ export default function CalendarPage() {
         {days.map((day) => {
           const key = dateKey(day);
           const isTodayColumn = key === dateKey(new Date());
-          const dayMeetings = meetings.filter((m) => localDayKey(m.starts_at) === key);
+          const dayMeetings = visibleMeetings.filter((m) => localDayKey(m.starts_at) === key);
           const overflow = dayMeetings.length > 2;
-          const eventCols = Math.max(1, Math.ceil(dayMeetings.length / 2));
+          const laneWidth = dayLaneWidth(dayMeetings.length);
           return (
             <Card
               key={key}
@@ -427,11 +452,11 @@ export default function CalendarPage() {
                   ? "!border-[rgba(0,229,255,0.35)] shadow-[0_0_20px_rgba(0,229,255,0.12)]"
                   : ""
               }`}
-              style={
-                overflow
-                  ? { width: `calc(${eventCols} * 9.5rem + ${(eventCols - 1) * 0.5}rem + 1.5rem)` }
-                  : { width: "9.5rem" }
-              }
+              style={{
+                flex: `0 0 ${laneWidth}`,
+                width: laneWidth,
+                minWidth: laneWidth,
+              }}
             >
               <p
                 className={`text-xs uppercase tracking-[0.14em] ${
