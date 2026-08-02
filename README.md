@@ -4,7 +4,7 @@
 
 A multi-role Salesforce-lite workspace for Sales Development, Account Executive, and Sales Manager. Built as a full-stack portfolio product: Django REST + Celery on Postgres/Redis, and a dark synthwave Next.js client.
 
-[Learning guide](./LEARNING.md) · [About Vaporware-Road](./frontend/src/app/about/page.tsx)
+[Learning guide](./LEARNING.md) · [Management plan](./managementPlan.md) · [About Vaporware-Road](./frontend/src/app/about/page.tsx)
 
 ---
 
@@ -135,6 +135,20 @@ HTTP stays fast; imports, exports, emails, sequence advances, stale scans, and d
 
 ---
 
+## App routes
+
+| Route | Who | Purpose |
+|-------|-----|---------|
+| `/login` | Public | Demo role buttons + password login |
+| `/profile` | All roles | Self identity, password, workspace counts, notifications |
+| `/admin` | Sales Manager | Team / Routing / Operations / Jobs |
+| `/settings` | — | Redirects to `/admin` |
+| `/dashboard` … `/jobs` | Role-scoped | Core CRM surfaces (see Learning guide) |
+
+Role **codes** stay `SDR` / `AE` / `MANAGER`; the UI always shows professional labels.
+
+---
+
 ## API map
 
 | Method | Path | Notes |
@@ -158,7 +172,7 @@ HTTP stays fast; imports, exports, emails, sequence advances, stale scans, and d
 | GET/PATCH | `/api/routing-rules/` | Manager lead routing |
 | CRUD | `/api/sequences/`, `/api/sequence-enrollments/`, `/api/email-templates/` | |
 | GET | `/api/jobs/` | Celery job status |
-| POST | `/api/ops/<action>/` | stale-scan, warm-cache, reset-demo, … |
+| POST | `/api/ops/<action>/` | stale-scan, warm-cache, reset-demo, advance-sequences |
 
 ---
 
@@ -166,12 +180,13 @@ HTTP stays fast; imports, exports, emails, sequence advances, stale scans, and d
 
 ```text
 .
-├── backend/          # Django project (config + apps/accounts + apps/crm)
-├── frontend/         # Next.js App Router UI
+├── backend/            # Django (config + apps/accounts + apps/crm)
+├── frontend/           # Next.js App Router UI
 ├── docker-compose.yml
 ├── Dockerfile.backend
 ├── requirements.txt
-├── LEARNING.md       # Deep dive for learning / interviews
+├── LEARNING.md         # Deep dive for learning / interviews
+├── managementPlan.md   # Profile + Admin hub build plan (complete)
 └── README.md
 ```
 
@@ -179,7 +194,7 @@ HTTP stays fast; imports, exports, emails, sequence advances, stale scans, and d
 
 ## Resume bullet
 
-> Built **PipelineHQ**, a multi-role B2B SaaS sales CRM with Django REST, JWT RBAC, PostgreSQL, and Celery/Redis for async lead import, notifications, sequence cadence, overdue-task alerts, stale-deal scanning, and forecast/analytics export; shipped a responsive Next.js client with global search, MEDDIC stage gates, deal comments/@mentions, tasks, pipeline filters, and manager forecasting.
+> Built **PipelineHQ**, a multi-role B2B SaaS sales CRM with Django REST, JWT RBAC, PostgreSQL, and Celery/Redis for async lead import, notifications, sequence cadence, overdue-task alerts, stale-deal scanning, and forecast/analytics export; shipped a responsive Next.js client with Profile self-service, Sales Manager Admin hub (team/roles, routing, ops), global search, MEDDIC stage gates, deal comments/@mentions, tasks, and pipeline filters.
 
 ---
 
