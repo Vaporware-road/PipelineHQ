@@ -29,6 +29,7 @@ PyJWT==2.13.0
 python-crontab==3.3.0
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.2
+python-telegram-bot==22.5
 # redis-py 8 sets socket_timeout=5 by default; CHANNEL_LAYERS must pass
 # socket_timeout=None (see config/settings.py) or idle WebSockets die every ~5s.
 redis==8.1.0

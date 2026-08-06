@@ -10,6 +10,7 @@ Learning notes:
 from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 import os
@@ -41,6 +42,7 @@ INSTALLED_APPS = [
     # Local
     "apps.accounts",
     "apps.crm",
+    "apps.telegram.apps.TelegramConfig",
 ]
 
 MIDDLEWARE = [
@@ -148,6 +150,22 @@ CORS_ALLOWED_ORIGINS = [
     if o.strip()
 ]
 CORS_ALLOW_CREDENTIALS = True
+
+# ---------------------------------------------------------------------------
+# Telegram Mini App / bot (optional — empty token must not crash web/worker)
+# ---------------------------------------------------------------------------
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+TELEGRAM_BOT_USERNAME = os.getenv("TELEGRAM_BOT_USERNAME", "").strip()
+TELEGRAM_WEBAPP_URL = os.getenv("TELEGRAM_WEBAPP_URL", "").strip()
+TELEGRAM_BOT_ENABLED = os.getenv("TELEGRAM_BOT_ENABLED", "1") == "1"
+
+# When tunneling the Mini App, add its public origin to CORS (same pattern as frontend).
+if TELEGRAM_WEBAPP_URL:
+    _webapp = urlparse(TELEGRAM_WEBAPP_URL)
+    if _webapp.scheme and _webapp.netloc:
+        _webapp_origin = f"{_webapp.scheme}://{_webapp.netloc}"
+        if _webapp_origin not in CORS_ALLOWED_ORIGINS:
+            CORS_ALLOWED_ORIGINS.append(_webapp_origin)
 
 # ---------------------------------------------------------------------------
 # Cache + Celery (Redis)

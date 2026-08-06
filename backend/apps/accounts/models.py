@@ -12,6 +12,7 @@ class User(AbstractUser):
     title = models.CharField(max_length=120, blank=True)
     phone = models.CharField(max_length=40, blank=True)
     booking_slug = models.SlugField(max_length=64, blank=True, unique=True, null=True)
+    telegram_id = models.BigIntegerField(null=True, blank=True, unique=True)
 
     def __str__(self) -> str:
         return f"{self.username} ({self.role})"

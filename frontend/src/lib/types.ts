@@ -11,6 +11,7 @@ export type User = {
   phone: string;
   is_active?: boolean;
   booking_slug?: string | null;
+  telegram_id?: number | null;
 };
 
 export type MeSummary = {

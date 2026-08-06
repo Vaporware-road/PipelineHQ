@@ -18,6 +18,7 @@ class UserSerializer(serializers.ModelSerializer):
             "phone",
             "is_active",
             "booking_slug",
+            "telegram_id",
         )
         read_only_fields = fields
 
