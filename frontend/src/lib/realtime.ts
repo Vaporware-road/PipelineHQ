@@ -2,11 +2,23 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+/** Empty = same-origin HTTP via Next rewrite; WS still needs a direct Django origin. */
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 function wsUrl(): string {
   const explicit = process.env.NEXT_PUBLIC_WS_URL;
   if (explicit) return explicit.replace(/\/$/, "");
+  if (!API_URL) {
+    if (typeof window !== "undefined") {
+      // Desktop/local: API is proxied; Daphne WS is still on :8000.
+      const { protocol, hostname } = window.location;
+      const wsProto = protocol === "https:" ? "wss:" : "ws:";
+      if (hostname === "localhost" || hostname === "127.0.0.1") {
+        return `${wsProto}//${hostname}:8000`;
+      }
+    }
+    return "ws://127.0.0.1:8000";
+  }
   try {
     const u = new URL(API_URL);
     u.protocol = u.protocol === "https:" ? "wss:" : "ws:";

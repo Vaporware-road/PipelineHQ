@@ -6,6 +6,7 @@ import { useTmaAuth } from "@/lib/tma-auth";
 
 export default function TmaLinkPage() {
   const { phase, linkAccount } = useTmaAuth();
+  // Demo seed users (seed_demo); fine for local Mini App testing.
   const [username, setUsername] = useState("ae");
   const [password, setPassword] = useState("demo1234");
   const [error, setError] = useState("");

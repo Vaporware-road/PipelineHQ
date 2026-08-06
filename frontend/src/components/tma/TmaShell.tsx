@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Button, Card } from "@/components/ui";
 import { useTmaAuth } from "@/lib/tma-auth";
 
@@ -23,10 +23,23 @@ function BootScreen({ message }: { message: string }) {
 }
 
 export function TmaShell({ children }: { children: ReactNode }) {
-  const { phase, retry } = useTmaAuth();
+  const { phase, retry, unlinkAccount } = useTmaAuth();
   const pathname = usePathname();
   const onLink = pathname === "/tma/link";
   const showTabs = phase.kind === "ready" && !onLink;
+  const [unlinking, setUnlinking] = useState(false);
+
+  async function onUnlink() {
+    if (unlinking) return;
+    setUnlinking(true);
+    try {
+      await unlinkAccount();
+    } catch {
+      /* keep session; error surfaces on next boot if needed */
+    } finally {
+      setUnlinking(false);
+    }
+  }
 
   let body: ReactNode;
   switch (phase.kind) {
@@ -71,9 +84,19 @@ export function TmaShell({ children }: { children: ReactNode }) {
             <p className="text-[10px] uppercase tracking-[0.2em] text-[var(--cyan)]">Mini App</p>
           </div>
           {phase.kind === "ready" ? (
-            <p className="truncate text-xs text-[var(--muted)]">
-              {phase.user.first_name || phase.user.username}
-            </p>
+            <div className="flex min-w-0 flex-col items-end gap-0.5">
+              <p className="truncate text-xs text-[var(--muted)]">
+                {phase.user.first_name || phase.user.username}
+              </p>
+              <button
+                type="button"
+                onClick={onUnlink}
+                disabled={unlinking}
+                className="text-[10px] uppercase tracking-[0.12em] text-[var(--muted)] hover:text-[var(--danger)] disabled:opacity-50"
+              >
+                {unlinking ? "Unlinking…" : "Unlink"}
+              </button>
+            </div>
           ) : null}
         </div>
       </header>

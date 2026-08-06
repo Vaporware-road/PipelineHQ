@@ -97,3 +97,19 @@ export function deepLinkHref(link: TmaDeepLink): string {
     }
   }
 }
+
+/** Bot username from NEXT_PUBLIC_TELEGRAM_BOT_USERNAME (no @). Empty if unset. */
+export function telegramBotUsername(): string {
+  const raw = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME ?? "";
+  return raw.replace(/^@/, "").trim();
+}
+
+/** `https://t.me/<bot>` or with `?startapp=` when username is configured. */
+export function telegramBotHref(startapp?: string): string {
+  const user = telegramBotUsername();
+  if (!user) return "";
+  if (startapp) {
+    return `https://t.me/${user}?startapp=${encodeURIComponent(startapp)}`;
+  }
+  return `https://t.me/${user}`;
+}

@@ -1,6 +1,8 @@
 # Telegram Mini App — PipelineHQ
 
-Docker-first setup for the bot + Mini App. Telegram requires **HTTPS** for Mini Apps; local testing uses a tunnel to the frontend.
+Docker-first setup for the bot + Mini App. Telegram requires **HTTPS** for Mini Apps. Local phone testing uses a tunnel to the frontend; the Mini App reaches the API through a same-origin Next.js `/api` proxy so you do **not** need a second tunnel for Django in the default setup.
+
+**Never put `TELEGRAM_BOT_TOKEN` in the frontend.** Token stays on `web` / `worker` / `beat` / `telegram-bot` only.
 
 ## Official links
 
@@ -15,12 +17,12 @@ Docker-first setup for the bot + Mini App. Telegram requires **HTTPS** for Mini 
 ## BotFather checklist
 
 1. Message [@BotFather](https://t.me/BotFather) → `/newbot` (or reuse an existing bot).
-2. Copy the **bot token** → `TELEGRAM_BOT_TOKEN`.
-3. Note the **bot username** (without `@`) → `TELEGRAM_BOT_USERNAME` and `NEXT_PUBLIC_TELEGRAM_BOT_USERNAME`.
+2. Copy the **bot token** → `TELEGRAM_BOT_TOKEN` (backend only).
+3. Note the **bot username** (without `@`) → `TELEGRAM_BOT_USERNAME` and `NEXT_PUBLIC_TELEGRAM_BOT_USERNAME` (username only; used for `t.me` deep links in the Mini App).
 4. After you have a public HTTPS URL for the Mini App (see tunnel below):
    - Set **Main Mini App** / menu button URL to `https://<tunnel-host>/tma`
    - That same URL goes in `TELEGRAM_WEBAPP_URL`
-5. Optional: `/setmenubutton` with `WebAppInfo` pointing at `TELEGRAM_WEBAPP_URL`.
+5. Optional: `/setmenubutton` with `WebAppInfo` pointing at `TELEGRAM_WEBAPP_URL`. The bot also sets the menu button on `/start` and at startup when the webapp URL is configured.
 
 ## Environment
 
@@ -29,14 +31,16 @@ Copy from [`.env.example`](.env.example) into `.env` (Compose reads `${TELEGRAM_
 | Variable | Required | Purpose |
 |----------|----------|---------|
 | `TELEGRAM_BOT_TOKEN` | for real bot / initData | BotFather token; empty = web/worker start fine; `telegram-bot` idles |
-| `TELEGRAM_BOT_USERNAME` | recommended | Bot username without `@` |
+| `TELEGRAM_BOT_USERNAME` | recommended | Bot username without `@` (alerts / deep links server-side) |
 | `TELEGRAM_WEBAPP_URL` | for Mini App launch | Public HTTPS URL ending in `/tma` |
 | `TELEGRAM_BOT_ENABLED` | optional (default `1`) | `0` keeps the bot container idle |
-| `NEXT_PUBLIC_TELEGRAM_BOT_USERNAME` | optional | Frontend deep links (set to the same value as `TELEGRAM_BOT_USERNAME`) |
+| `NEXT_PUBLIC_TELEGRAM_BOT_USERNAME` | optional | Same username; Mini App `t.me/<bot>` links on home |
+| `NEXT_PUBLIC_API_URL` | optional | **Leave empty** for same-origin `/api` via Next rewrite (recommended for phone tunnels). Set only if you expose Django on a separate public URL |
+| `API_PROXY_TARGET` | Compose default | Django origin for Next rewrites (`http://web:8000` in Compose) |
 
 Missing token must **not** crash `web` / `worker` / `beat` at import. The `telegram-bot` service logs “not configured” and sleeps.
 
-When `TELEGRAM_WEBAPP_URL` is set, Django appends its origin to `CORS_ALLOWED_ORIGINS` automatically (in addition to values in that env var). You can also list the tunnel origin explicitly:
+When `TELEGRAM_WEBAPP_URL` is set, Django appends its origin to `CORS_ALLOWED_ORIGINS` automatically. With the default same-origin proxy, the browser talks to the tunnel host only, so CORS is less critical for the Mini App; keep the tunnel origin listed if you use a separate API URL.
 
 ```bash
 CORS_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,https://<id>.trycloudflare.com
@@ -47,64 +51,86 @@ CORS_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,https://<id>.tr
 Rebuild after dependency or Dockerfile changes (includes `python-telegram-bot`):
 
 ```bash
-docker compose build web worker beat telegram-bot
+docker compose build web worker beat telegram-bot frontend
 docker compose up -d
-```
-
-Bring the full stack (including the new service):
-
-```bash
-docker compose up -d
-# or foreground:
-docker compose up
 ```
 
 Services involved:
 
 | Service | Role |
 |---------|------|
-| `web` | API; gets `TELEGRAM_*` for later initData auth |
-| `worker` / `beat` | Future alerts via Bot API |
-| `telegram-bot` | `python manage.py run_telegram_bot` (Phase 1 stub idles without token) |
-| `frontend` | Serves `/tma` once Phase 3 lands; tunnel target on `:3000` |
+| `web` | API + initData auth/link; `TELEGRAM_*` for validation |
+| `worker` / `beat` | Celery alerts via Bot API (token server-side only) |
+| `telegram-bot` | Long-polling: `/start`, menu button → `TELEGRAM_WEBAPP_URL` |
+| `frontend` | Serves `/tma`; rewrites `/api/*` → `web:8000`; tunnel target on `:3000` |
 
 Check the bot container:
 
 ```bash
 docker compose logs -f telegram-bot
-# Expect: TELEGRAM_BOT_TOKEN not set — bot not configured; idling...
+# Without token: TELEGRAM_BOT_TOKEN not set — bot not configured; idling...
+# With token: polling / listening for updates
 ```
 
-## HTTPS tunnel → Mini App URL
+## HTTPS tunnel (phone + Telegram)
 
-Telegram Mini Apps only open over HTTPS. Point a tunnel at the frontend container:
+Telegram Mini Apps only open over HTTPS. Point **one** tunnel at the frontend. The Mini App calls `/api/...` on that same host; Next proxies to Django inside Compose.
 
 ```bash
-# Host machine (example with cloudflared)
+# Host machine
 cloudflared tunnel --url http://127.0.0.1:3000
 ```
 
 Then:
 
-1. Set `TELEGRAM_WEBAPP_URL=https://<id>.trycloudflare.com/tma` in `.env`
-2. Restart backend services so settings pick up the URL: `docker compose up -d web worker beat telegram-bot`
-3. In BotFather, set Main Mini App + menu button to that same `/tma` URL
+1. Set in `.env`:
+   - `TELEGRAM_WEBAPP_URL=https://<id>.trycloudflare.com/tma`
+   - Leave `NEXT_PUBLIC_API_URL` empty (Compose default)
+   - Set `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`, `NEXT_PUBLIC_TELEGRAM_BOT_USERNAME`
+2. Restart so settings and frontend env pick up changes:
+   ```bash
+   docker compose up -d web worker beat telegram-bot frontend
+   ```
+   Rebuild frontend if `NEXT_PUBLIC_*` values changed after an image build that baked them in:
+   ```bash
+   docker compose build frontend && docker compose up -d frontend
+   ```
+3. In BotFather, set Main Mini App + menu button to that same `/tma` URL.
 
-ngrok equivalent: `ngrok http 3000` → use the `https://…` host + `/tma`.
+ngrok: `ngrok http 3000` → same steps with the `https://…` host + `/tma`.
+
+### Why not `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000`?
+
+That URL only works on the machine running Docker. A phone inside Telegram cannot reach your laptop’s loopback. Same-origin `/api` via the tunnel fixes that without exposing `:8000` publicly.
+
+### Optional: second tunnel for the API
+
+If you prefer the browser to call Django directly:
+
+```bash
+cloudflared tunnel --url http://127.0.0.1:8000   # API
+cloudflared tunnel --url http://127.0.0.1:3000   # Mini App
+```
+
+Set `NEXT_PUBLIC_API_URL=https://<api-tunnel-host>` (no path), rebuild/restart `frontend`, and ensure `CORS_ALLOWED_ORIGINS` / `TELEGRAM_WEBAPP_URL` include the Mini App origin.
 
 ## Phase status
 
-- **Phase 1:** env, Compose `telegram-bot`, `apps.telegram` skeleton, `User.telegram_id`, stub `run_telegram_bot`
-- **Phase 2:** `validate_init_data` HMAC + `/api/telegram/auth|link|unlink` + tests; `telegram_id` on `/api/auth/me/` and admin
-- **Phase 3:** Next.js `/tma` Mini App (synthwave) — home, link, leads, pipeline, schedule, clients + light PATCH
-- **Phase 4:** real bot `/start` + menu button; Celery alerts on lead/opp/meeting status/stage with `startapp` deep links
+Phases 1–4 are implemented:
 
-### Phase 4 — Bot + alerts
+| Phase | What’s live |
+|-------|-------------|
+| **1** | Env, Compose `telegram-bot`, `apps.telegram`, `User.telegram_id`, docs |
+| **2** | `validate_init_data` HMAC + `/api/telegram/auth\|link\|unlink` + tests |
+| **3** | Next.js `/tma` Mini App — home, link, leads, pipeline, schedule, clients + light PATCH |
+| **4** | Bot `/start` + menu button; Celery alerts on lead/opp/meeting changes with `startapp` deep links |
 
-`telegram-bot` service runs `python manage.py run_telegram_bot`:
+### Bot + alerts (Phase 4)
+
+`telegram-bot` runs `python manage.py run_telegram_bot`:
 
 - Missing token / `TELEGRAM_BOT_ENABLED=0` → idle (container stays up)
-- With token → long-polling; `/start` greets user and sets the chat menu button to `TELEGRAM_WEBAPP_URL`
+- With token → long-polling; `/start` greets and sets the chat menu button to `TELEGRAM_WEBAPP_URL`
 - On startup, sets the **default** menu button to the Mini App URL when configured
 
 Celery worker tasks (token stays server-side only):
@@ -117,27 +143,20 @@ Celery worker tasks (token stays server-side only):
 
 Notifies the lead/opportunity **owner** or meeting **host** when they have `telegram_id` set. Message includes a `t.me/<bot>?startapp=…` link (or `TELEGRAM_WEBAPP_URL?startapp=…` fallback).
 
-### Phase 3 Mini App routes
+### Mini App routes (Phase 3)
 
 | Route | Purpose |
 |-------|---------|
-| `/tma` | Bootstrap + compact dashboard |
+| `/tma` | Bootstrap + compact dashboard; unlink in header |
 | `/tma/link` | Bind Telegram user ↔ PipelineHQ username/password |
 | `/tma/leads`, `/tma/leads/[id]` | List + PATCH `status` |
 | `/tma/pipeline`, `/tma/opportunities/[id]` | Open deals by stage + PATCH `stage` |
-| `/tma/schedule`, `/tma/schedule/[id]` | Upcoming meetings + PATCH `status` |
+| `/tma/schedule`, `/tma/schedule/[id]` | Upcoming meetings + PATCH `status` (visible meetings; non-managers status-only) |
 | `/tma/clients` | Accounts/contacts glance |
 
 Deep links via `start_param` / `?startapp=`: `lead_<id>`, `opp_<id>`, `meeting_<id>`.
 
-Rebuild frontend after route changes:
-
-```bash
-docker compose build frontend
-docker compose up -d frontend
-```
-
-### Phase 2 API
+### Auth API (Phase 2)
 
 | Method | Path | Auth | Body / result |
 |--------|------|------|----------------|

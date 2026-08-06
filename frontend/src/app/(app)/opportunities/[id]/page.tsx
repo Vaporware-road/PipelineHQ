@@ -9,7 +9,7 @@ import { CommentThread } from "@/components/CommentThread";
 import { CustomFieldsPanel } from "@/components/CustomFieldsPanel";
 import { AiAssistPanel } from "@/components/AiAssistPanel";
 import { Badge, Button, Card, Empty, Input, Money, PageHeader, Select, Textarea } from "@/components/ui";
-import { api, apiList } from "@/lib/api";
+import { API_URL, api, apiList } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import type { CrmTask, Opportunity, OutboundEmail, Product, Quote } from "@/lib/types";
 
@@ -166,7 +166,7 @@ export default function OpportunityDetailPage() {
     try {
       const token = localStorage.getItem("pipelinehq_access");
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000"}/api/quotes/${quoteId}/preview/`,
+        `${API_URL}/api/quotes/${quoteId}/preview/`,
         { headers: token ? { Authorization: `Bearer ${token}` } : {} },
       );
       if (!res.ok) throw new Error("Preview failed");

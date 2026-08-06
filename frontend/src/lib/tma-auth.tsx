@@ -45,6 +45,7 @@ type TmaPhase =
 type TmaAuthState = {
   phase: TmaPhase;
   linkAccount: (username: string, password: string) => Promise<void>;
+  unlinkAccount: () => Promise<void>;
   retry: () => void;
 };
 
@@ -145,14 +146,21 @@ export function TmaAuthProvider({ children }: { children: ReactNode }) {
     [applySession, router],
   );
 
+  const unlinkAccount = useCallback(async () => {
+    await api<{ detail: string }>("/api/telegram/unlink/", { method: "POST" });
+    clearTokens();
+    deepLinkHandled.current = false;
+    setBootKey((k) => k + 1);
+  }, []);
+
   const retry = useCallback(() => {
     deepLinkHandled.current = false;
     setBootKey((k) => k + 1);
   }, []);
 
   const value = useMemo(
-    () => ({ phase, linkAccount, retry }),
-    [phase, linkAccount, retry],
+    () => ({ phase, linkAccount, unlinkAccount, retry }),
+    [phase, linkAccount, unlinkAccount, retry],
   );
 
   return <TmaAuthContext.Provider value={value}>{children}</TmaAuthContext.Provider>;

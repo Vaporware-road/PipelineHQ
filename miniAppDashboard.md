@@ -135,11 +135,12 @@ docker compose build web worker beat telegram-bot
 docker compose up -d
 ```
 
-Tunnel example (host):
+Tunnel example (host) — one tunnel to frontend; `/api` is proxied to Django:
 
 ```bash
 cloudflared tunnel --url http://127.0.0.1:3000
 # Set TELEGRAM_WEBAPP_URL=https://<id>.trycloudflare.com/tma
+# Leave NEXT_PUBLIC_API_URL empty (same-origin proxy)
 # BotFather Main Mini App + menu button → same URL
 ```
 
@@ -155,9 +156,9 @@ cloudflared tunnel --url http://127.0.0.1:3000
 
 ## Verification
 
-- Phase 1: Compose healthy; migration; telegram app importable; stub bot starts
+- Phase 1: Compose healthy; migration; telegram app importable; bot starts (idle or polling)
 - Phase 2: validate_init_data tests; auth → needs_link → link → JWT
-- Phase 3–4: tunnel + BotFather → link demo user → browse + PATCH → alert
+- Phase 3–4: tunnel + BotFather → link demo user → browse + PATCH → alert; meeting status PATCH works for visible AE/SDR meetings
 
 ## Implementation order (summary)
 
@@ -168,7 +169,7 @@ cloudflared tunnel --url http://127.0.0.1:3000
 
 ## Todos
 
-- [ ] **Phase 1:** Env, settings, Compose `telegram-bot`, `apps/telegram` skeleton, `telegram_id` migration, `TELEGRAM.md`
-- [ ] **Phase 2:** initData validator + `/api/telegram/auth|link|unlink` + tests
-- [ ] **Phase 3:** `/tma` Mini App shell (synthwave) with tracker tabs + light PATCH actions
-- [ ] **Phase 4:** Real bot worker + Celery status/stage alerts with `startapp` deep links
+- [x] **Phase 1:** Env, settings, Compose `telegram-bot`, `apps/telegram` skeleton, `telegram_id` migration, `TELEGRAM.md`
+- [x] **Phase 2:** initData validator + `/api/telegram/auth|link|unlink` + tests
+- [x] **Phase 3:** `/tma` Mini App shell (synthwave) with tracker tabs + light PATCH actions
+- [x] **Phase 4:** Real bot worker + Celery status/stage alerts with `startapp` deep links

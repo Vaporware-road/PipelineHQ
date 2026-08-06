@@ -10,6 +10,7 @@ from django.utils.html import escape
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -1209,10 +1210,21 @@ class MeetingViewSet(viewsets.ModelViewSet):
     http_method_names = ["get", "post", "patch", "head", "options"]
 
     def get_permissions(self):
-        # Only managers may create or edit meetings.
-        if self.action in {"create", "partial_update", "update", "destroy"}:
+        # Create / full update / destroy stay manager-only.
+        # partial_update: managers can edit any field; non-managers may PATCH status only
+        # on meetings already visible via get_queryset (404 if not visible).
+        if self.action in {"create", "update", "destroy"}:
             return [IsAuthenticated(), IsManager()]
         return super().get_permissions()
+
+    def partial_update(self, request, *args, **kwargs):
+        if request.user.role != User.Role.MANAGER:
+            keys = set(request.data.keys())
+            if keys != {"status"}:
+                raise PermissionDenied(
+                    "Only managers can edit meeting fields other than status."
+                )
+        return super().partial_update(request, *args, **kwargs)
 
     def get_queryset(self):
         qs = Meeting.objects.select_related("host", "lead", "contact", "opportunity").prefetch_related(

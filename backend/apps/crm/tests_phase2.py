@@ -219,6 +219,73 @@ class Phase2CommsAPITests(APITestCase):
         ae_ids = [m["id"] for m in hidden.data["results"]]
         self.assertNotIn(meeting_id, ae_ids)
 
+    def test_non_manager_can_patch_visible_meeting_status_only(self):
+        starts = timezone.now() + timedelta(days=2)
+        ends = starts + timedelta(minutes=30)
+        ae_meeting = Meeting.objects.create(
+            host=self.manager,
+            title="AE standup",
+            invitee_name="Buyer",
+            invitee_email="buyer@ae.test",
+            starts_at=starts,
+            ends_at=ends,
+            target_role=Meeting.TargetRole.AE,
+            status=Meeting.Status.SCHEDULED,
+            job_detail="Discovery",
+        )
+        sdr_meeting = Meeting.objects.create(
+            host=self.manager,
+            title="SDR standup",
+            invitee_name="Lead",
+            invitee_email="lead@sdr.test",
+            starts_at=starts + timedelta(hours=1),
+            ends_at=ends + timedelta(hours=1),
+            target_role=Meeting.TargetRole.SDR,
+            status=Meeting.Status.SCHEDULED,
+        )
+
+        detail = reverse("meeting-detail", args=[ae_meeting.id])
+
+        self.client.force_authenticate(self.manager)
+        mgr = self.client.patch(detail, {"status": "completed"}, format="json")
+        self.assertEqual(mgr.status_code, status.HTTP_200_OK, mgr.data)
+        self.assertEqual(mgr.data["status"], "completed")
+        ae_meeting.status = Meeting.Status.SCHEDULED
+        ae_meeting.save(update_fields=["status"])
+
+        self.client.force_authenticate(self.ae)
+        ok = self.client.patch(detail, {"status": "completed"}, format="json")
+        self.assertEqual(ok.status_code, status.HTTP_200_OK, ok.data)
+        self.assertEqual(ok.data["status"], "completed")
+        ae_meeting.refresh_from_db()
+        self.assertEqual(ae_meeting.status, Meeting.Status.COMPLETED)
+
+        blocked_field = self.client.patch(detail, {"job_detail": "Nope"}, format="json")
+        self.assertEqual(blocked_field.status_code, status.HTTP_403_FORBIDDEN)
+
+        blocked_combo = self.client.patch(
+            detail,
+            {"status": "cancelled", "notes": "extra"},
+            format="json",
+        )
+        self.assertEqual(blocked_combo.status_code, status.HTTP_403_FORBIDDEN)
+
+        self.client.force_authenticate(self.sdr)
+        invisible = self.client.patch(
+            reverse("meeting-detail", args=[ae_meeting.id]),
+            {"status": "cancelled"},
+            format="json",
+        )
+        self.assertEqual(invisible.status_code, status.HTTP_404_NOT_FOUND)
+
+        sdr_ok = self.client.patch(
+            reverse("meeting-detail", args=[sdr_meeting.id]),
+            {"status": "cancelled"},
+            format="json",
+        )
+        self.assertEqual(sdr_ok.status_code, status.HTTP_200_OK, sdr_ok.data)
+        self.assertEqual(sdr_ok.data["status"], "cancelled")
+
     def test_timeline_includes_email(self):
         EmailMessage.objects.create(
             to_email="a@b.c",

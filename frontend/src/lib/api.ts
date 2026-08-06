@@ -1,6 +1,11 @@
 import type { Paginated } from "./types";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+/**
+ * Empty string = same-origin (Next.js rewrites `/api` → Django).
+ * Set NEXT_PUBLIC_API_URL to a public API origin when the Mini App cannot
+ * reach Django through the frontend proxy (second tunnel).
+ */
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 export class ApiError extends Error {
   status: number;

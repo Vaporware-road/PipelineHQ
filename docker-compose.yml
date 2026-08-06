@@ -123,8 +123,12 @@ services:
     ports:
       - "3000:3000"
     environment:
-      NEXT_PUBLIC_API_URL: http://127.0.0.1:8000
+      # Empty = browser calls same origin; Next rewrites /api → web (phone-friendly one-tunnel).
+      # Override with a public API URL if you tunnel Django separately.
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+      API_PROXY_TARGET: http://web:8000
       NEXT_PUBLIC_TELEGRAM_BOT_USERNAME: ${NEXT_PUBLIC_TELEGRAM_BOT_USERNAME:-}
+      NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-}
     depends_on:
       - web
 

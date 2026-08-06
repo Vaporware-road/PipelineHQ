@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Badge, Card, Empty, Money } from "@/components/ui";
 import { api } from "@/lib/api";
+import { telegramBotHref, telegramBotUsername } from "@/lib/telegram";
 import { useTmaAuth } from "@/lib/tma-auth";
 import { labelFor, OPP_STAGES } from "@/lib/tma-constants";
 import type { Dashboard } from "@/lib/types";
@@ -12,6 +13,8 @@ export default function TmaHomePage() {
   const { phase } = useTmaAuth();
   const [data, setData] = useState<Dashboard | null>(null);
   const [error, setError] = useState("");
+  const botUser = telegramBotUsername();
+  const botHref = telegramBotHref();
 
   useEffect(() => {
     if (phase.kind !== "ready") return;
@@ -107,6 +110,15 @@ export default function TmaHomePage() {
           Pipeline
         </Link>
       </div>
+
+      {botHref ? (
+        <p className="text-center text-xs text-[var(--muted)]">
+          Bot:{" "}
+          <a href={botHref} className="text-[var(--cyan)] hover:underline" target="_blank" rel="noreferrer">
+            @{botUser}
+          </a>
+        </p>
+      ) : null}
     </div>
   );
 }
