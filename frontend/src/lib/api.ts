@@ -63,7 +63,17 @@ export async function api<T>(
   }
   const res = await fetch(`${API_URL}${path}`, { ...rest, headers: finalHeaders });
   const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
+  let data: unknown = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      const snippet = text.trim().slice(0, 80).replace(/\s+/g, " ");
+      throw new ApiError(res.status || 502, {
+        detail: `API returned non-JSON (is the backend/proxy up?). ${snippet}`,
+      });
+    }
+  }
   if (!res.ok) throw new ApiError(res.status, data);
   return data as T;
 }

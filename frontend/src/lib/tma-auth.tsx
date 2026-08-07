@@ -39,13 +39,16 @@ type TelegramAuthResponse = TelegramAuthOk | TelegramAuthNeedsLink;
 type TmaPhase =
   | { kind: "booting" }
   | { kind: "needs_link"; telegramUser: TelegramWebAppUser }
+  | { kind: "needs_browser_login" }
   | { kind: "ready"; user: User }
   | { kind: "error"; message: string };
 
 type TmaAuthState = {
   phase: TmaPhase;
   linkAccount: (username: string, password: string) => Promise<void>;
+  browserLogin: (username: string, password: string) => Promise<void>;
   unlinkAccount: () => Promise<void>;
+  signOut: () => void;
   retry: () => void;
 };
 
@@ -73,7 +76,7 @@ export function TmaAuthProvider({ children }: { children: ReactNode }) {
 
     const initData = getInitData();
     if (!initData) {
-      // Browser/dev: reuse an existing JWT if present
+      // Browser / local: reuse JWT, otherwise show password login (no Telegram required).
       const existing = typeof window !== "undefined" ? localStorage.getItem("pipelinehq_access") : null;
       if (existing) {
         try {
@@ -84,10 +87,7 @@ export function TmaAuthProvider({ children }: { children: ReactNode }) {
           clearTokens();
         }
       }
-      setPhase({
-        kind: "error",
-        message: "Open this Mini App from Telegram (Telegram.WebApp.initData is missing).",
-      });
+      setPhase({ kind: "needs_browser_login" });
       return;
     }
 
@@ -146,8 +146,29 @@ export function TmaAuthProvider({ children }: { children: ReactNode }) {
     [applySession, router],
   );
 
+  const browserLogin = useCallback(
+    async (username: string, password: string) => {
+      const tokens = await api<{ access: string; refresh: string }>("/api/auth/token/", {
+        method: "POST",
+        auth: false,
+        body: JSON.stringify({ username, password }),
+      });
+      setTokens(tokens.access, tokens.refresh);
+      const me = await api<User>("/api/auth/me/");
+      setPhase({ kind: "ready", user: me });
+      if (pathname !== "/tma") router.replace("/tma");
+    },
+    [pathname, router],
+  );
+
   const unlinkAccount = useCallback(async () => {
     await api<{ detail: string }>("/api/telegram/unlink/", { method: "POST" });
+    clearTokens();
+    deepLinkHandled.current = false;
+    setBootKey((k) => k + 1);
+  }, []);
+
+  const signOut = useCallback(() => {
     clearTokens();
     deepLinkHandled.current = false;
     setBootKey((k) => k + 1);
@@ -159,8 +180,8 @@ export function TmaAuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ phase, linkAccount, unlinkAccount, retry }),
-    [phase, linkAccount, unlinkAccount, retry],
+    () => ({ phase, linkAccount, browserLogin, unlinkAccount, signOut, retry }),
+    [phase, linkAccount, browserLogin, unlinkAccount, signOut, retry],
   );
 
   return <TmaAuthContext.Provider value={value}>{children}</TmaAuthContext.Provider>;

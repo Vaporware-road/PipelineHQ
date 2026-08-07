@@ -2,14 +2,18 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState, type ReactNode } from "react";
-import { Button, Card } from "@/components/ui";
+import { useState, type FormEvent, type ReactNode } from "react";
+import { Button, Card, Input } from "@/components/ui";
 import { useTmaAuth } from "@/lib/tma-auth";
 
 const TABS = [
   { href: "/tma", label: "Home", match: (p: string) => p === "/tma" },
   { href: "/tma/leads", label: "Leads", match: (p: string) => p.startsWith("/tma/leads") },
-  { href: "/tma/pipeline", label: "Pipeline", match: (p: string) => p.startsWith("/tma/pipeline") || p.startsWith("/tma/opportunities") },
+  {
+    href: "/tma/pipeline",
+    label: "Pipeline",
+    match: (p: string) => p.startsWith("/tma/pipeline") || p.startsWith("/tma/opportunities"),
+  },
   { href: "/tma/schedule", label: "Schedule", match: (p: string) => p.startsWith("/tma/schedule") },
   { href: "/tma/clients", label: "Clients", match: (p: string) => p.startsWith("/tma/clients") },
 ] as const;
@@ -22,22 +26,87 @@ function BootScreen({ message }: { message: string }) {
   );
 }
 
+function BrowserLoginCard() {
+  const { browserLogin } = useTmaAuth();
+  // Demo seed users (seed_demo); fine for local / browser testing.
+  const [username, setUsername] = useState("ae");
+  const [password, setPassword] = useState("demo1234");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      await browserLogin(username, password);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Login failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mx-auto max-w-md space-y-4 pt-4">
+      <div>
+        <h1 className="font-[family-name:var(--font-display)] text-xl tracking-[0.06em]">Sign in</h1>
+        <p className="mt-1 text-sm text-[var(--muted)]">
+          Browser mode — use your PipelineHQ username and password. No Telegram required.
+        </p>
+      </div>
+      <Card>
+        <form className="space-y-3" onSubmit={onSubmit}>
+          <Input
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="username"
+            autoComplete="username"
+            required
+          />
+          <Input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="password"
+            autoComplete="current-password"
+            required
+          />
+          {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
+          <Button type="submit" className="w-full" disabled={busy}>
+            {busy ? "Signing in…" : "Continue"}
+          </Button>
+        </form>
+        <p className="mt-3 text-xs text-[var(--muted)]">
+          Demo: <span className="text-[var(--cyan)]">ae / sdr / manager</span> · password{" "}
+          <span className="text-[var(--cyan)]">demo1234</span>
+        </p>
+      </Card>
+    </div>
+  );
+}
+
 export function TmaShell({ children }: { children: ReactNode }) {
-  const { phase, retry, unlinkAccount } = useTmaAuth();
+  const { phase, retry, unlinkAccount, signOut } = useTmaAuth();
   const pathname = usePathname();
   const onLink = pathname === "/tma/link";
   const showTabs = phase.kind === "ready" && !onLink;
-  const [unlinking, setUnlinking] = useState(false);
+  const [busyHeader, setBusyHeader] = useState(false);
+  const linkedToTelegram = phase.kind === "ready" && Boolean(phase.user.telegram_id);
 
-  async function onUnlink() {
-    if (unlinking) return;
-    setUnlinking(true);
+  async function onHeaderAction() {
+    if (busyHeader || phase.kind !== "ready") return;
+    setBusyHeader(true);
     try {
-      await unlinkAccount();
+      if (linkedToTelegram) {
+        await unlinkAccount();
+      } else {
+        signOut();
+      }
     } catch {
-      /* keep session; error surfaces on next boot if needed */
+      /* keep session */
     } finally {
-      setUnlinking(false);
+      setBusyHeader(false);
     }
   }
 
@@ -60,6 +129,9 @@ export function TmaShell({ children }: { children: ReactNode }) {
           </Card>
         </div>
       );
+      break;
+    case "needs_browser_login":
+      body = <BrowserLoginCard />;
       break;
     case "needs_link":
       body = onLink ? children : <BootScreen message="Redirecting to link…" />;
@@ -90,11 +162,15 @@ export function TmaShell({ children }: { children: ReactNode }) {
               </p>
               <button
                 type="button"
-                onClick={onUnlink}
-                disabled={unlinking}
+                onClick={onHeaderAction}
+                disabled={busyHeader}
                 className="text-[10px] uppercase tracking-[0.12em] text-[var(--muted)] hover:text-[var(--danger)] disabled:opacity-50"
               >
-                {unlinking ? "Unlinking…" : "Unlink"}
+                {busyHeader
+                  ? "…"
+                  : linkedToTelegram
+                    ? "Unlink"
+                    : "Sign out"}
               </button>
             </div>
           ) : null}
