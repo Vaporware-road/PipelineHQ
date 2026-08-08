@@ -49,33 +49,45 @@ export default function TmaHomePage() {
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <Card>
-          <p className="text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">Pipeline</p>
-          <p className="mt-1 text-lg font-semibold">
-            <Money value={data.pipeline_amount} />
-          </p>
-        </Card>
-        <Card>
-          <p className="text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">Open deals</p>
-          <p className="mt-1 text-lg font-semibold text-[var(--ink)]">{data.open_deals}</p>
-        </Card>
-        <Card>
-          <p className="text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">Open leads</p>
-          <p className="mt-1 text-lg font-semibold text-[var(--ink)]">{data.leads_open}</p>
-        </Card>
-        <Card>
-          <p className="text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">Won</p>
-          <p className="mt-1 text-lg font-semibold">
-            <Money value={data.won_amount} />
-          </p>
-        </Card>
+        <Link href="/tma/pipeline">
+          <Card className="transition hover:border-[var(--accent)]">
+            <p className="text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">Pipeline</p>
+            <p className="mt-1 text-lg font-semibold">
+              <Money value={data.pipeline_amount} />
+            </p>
+          </Card>
+        </Link>
+        <Link href="/tma/pipeline">
+          <Card className="transition hover:border-[var(--accent)]">
+            <p className="text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">Open deals</p>
+            <p className="mt-1 text-lg font-semibold text-[var(--ink)]">{data.open_deals}</p>
+          </Card>
+        </Link>
+        <Link href="/tma/leads">
+          <Card className="transition hover:border-[var(--accent)]">
+            <p className="text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">Open leads</p>
+            <p className="mt-1 text-lg font-semibold text-[var(--ink)]">{data.leads_open}</p>
+          </Card>
+        </Link>
+        <Link href="/tma/pipeline">
+          <Card className="transition hover:border-[var(--accent)]">
+            <p className="text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">Won</p>
+            <p className="mt-1 text-lg font-semibold">
+              <Money value={data.won_amount} />
+            </p>
+          </Card>
+        </Link>
       </div>
 
       {(data.stale_deals > 0 || data.at_risk_deals > 0) && (
-        <Card className="flex flex-wrap gap-2">
-          {data.stale_deals > 0 ? <Badge tone="warn">{data.stale_deals} stale</Badge> : null}
-          {data.at_risk_deals > 0 ? <Badge tone="warn">{data.at_risk_deals} at risk</Badge> : null}
-        </Card>
+        <Link href="/tma/pipeline">
+          <Card className="flex flex-wrap gap-2 transition hover:border-[var(--accent)]">
+            {data.stale_deals > 0 ? <Badge tone="warn">{data.stale_deals} stale</Badge> : null}
+            {data.at_risk_deals > 0 ? (
+              <Badge tone="warn">{data.at_risk_deals} at risk</Badge>
+            ) : null}
+          </Card>
+        </Link>
       )}
 
       <Card>
@@ -85,11 +97,16 @@ export default function TmaHomePage() {
             <li className="text-sm text-[var(--muted)]">No open stages</li>
           ) : (
             openStages.map((row) => (
-              <li key={row.stage} className="flex items-center justify-between gap-2 text-sm">
-                <span>{labelFor(OPP_STAGES, row.stage)}</span>
-                <span className="tabular-nums text-[var(--muted)]">
-                  {row.count} · <Money value={row.amount} />
-                </span>
+              <li key={row.stage}>
+                <Link
+                  href="/tma/pipeline"
+                  className="flex items-center justify-between gap-2 text-sm hover:text-[var(--accent)]"
+                >
+                  <span>{labelFor(OPP_STAGES, row.stage)}</span>
+                  <span className="tabular-nums text-[var(--muted)]">
+                    {row.count} · <Money value={row.amount} />
+                  </span>
+                </Link>
               </li>
             ))
           )}
@@ -108,6 +125,18 @@ export default function TmaHomePage() {
           className="rounded-lg border border-[var(--line)] px-3 py-3 text-center text-sm text-[var(--ink)] hover:border-[var(--accent)]"
         >
           Pipeline
+        </Link>
+        <Link
+          href="/tma/schedule"
+          className="rounded-lg border border-[var(--line)] px-3 py-3 text-center text-sm text-[var(--ink)] hover:border-[var(--accent)]"
+        >
+          Schedule
+        </Link>
+        <Link
+          href="/tma/clients"
+          className="rounded-lg border border-[var(--line)] px-3 py-3 text-center text-sm text-[var(--ink)] hover:border-[var(--accent)]"
+        >
+          Clients
         </Link>
       </div>
 

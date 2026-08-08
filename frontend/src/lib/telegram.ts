@@ -13,6 +13,14 @@ export type TelegramWebAppUser = {
   photo_url?: string;
 };
 
+export type TelegramBackButton = {
+  isVisible: boolean;
+  show: () => void;
+  hide: () => void;
+  onClick: (callback: () => void) => void;
+  offClick: (callback: () => void) => void;
+};
+
 export type TelegramWebApp = {
   initData: string;
   initDataUnsafe: {
@@ -24,12 +32,28 @@ export type TelegramWebApp = {
   ready: () => void;
   expand: () => void;
   close: () => void;
+  BackButton?: TelegramBackButton;
   themeParams?: Record<string, string>;
   colorScheme?: "light" | "dark";
   HapticFeedback?: {
     impactOccurred: (style: "light" | "medium" | "heavy" | "rigid" | "soft") => void;
   };
 };
+
+/** In-app parent for Telegram BackButton / browser back affordance. null = hide. */
+export function tmaBackHref(pathname: string): string | null {
+  if (pathname === "/tma" || pathname === "/tma/link") return null;
+  if (/^\/tma\/leads\/[^/]+$/.test(pathname)) return "/tma/leads";
+  if (pathname === "/tma/leads") return "/tma";
+  if (/^\/tma\/opportunities\/[^/]+$/.test(pathname)) return "/tma/pipeline";
+  if (pathname === "/tma/pipeline") return "/tma";
+  if (/^\/tma\/schedule\/[^/]+$/.test(pathname)) return "/tma/schedule";
+  if (pathname === "/tma/schedule") return "/tma";
+  if (/^\/tma\/clients\/(accounts|contacts)\/[^/]+$/.test(pathname)) return "/tma/clients";
+  if (pathname === "/tma/clients" || pathname.startsWith("/tma/clients/")) return "/tma";
+  if (pathname.startsWith("/tma/")) return "/tma";
+  return null;
+}
 
 declare global {
   interface Window {

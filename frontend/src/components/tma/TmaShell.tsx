@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { Button, Card, Input } from "@/components/ui";
 import { useTmaAuth } from "@/lib/tma-auth";
+import { useTmaBackButton } from "@/lib/use-tma-back-button";
 
 const TABS = [
   { href: "/tma", label: "Home", match: (p: string) => p === "/tma" },
@@ -93,6 +94,8 @@ export function TmaShell({ children }: { children: ReactNode }) {
   const showTabs = phase.kind === "ready" && !onLink;
   const [busyHeader, setBusyHeader] = useState(false);
   const linkedToTelegram = phase.kind === "ready" && Boolean(phase.user.telegram_id);
+
+  useTmaBackButton(pathname, phase.kind === "ready" && !onLink);
 
   async function onHeaderAction() {
     if (busyHeader || phase.kind !== "ready") return;

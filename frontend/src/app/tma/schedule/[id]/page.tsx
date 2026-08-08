@@ -39,15 +39,15 @@ export default function TmaMeetingDetailPage() {
     };
   }, [phase, id]);
 
-  async function saveStatus() {
-    if (!meeting || status === meeting.status) return;
+  async function patchStatus(nextStatus: string) {
+    if (!meeting || nextStatus === meeting.status) return;
     setBusy(true);
     setError("");
     setMessage("");
     try {
       const updated = await api<Meeting>(`/api/meetings/${id}/`, {
         method: "PATCH",
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({ status: nextStatus }),
       });
       setMeeting(updated);
       setStatus(updated.status);
@@ -102,15 +102,15 @@ export default function TmaMeetingDetailPage() {
         <div className="grid grid-cols-2 gap-2">
           <Button
             variant="ghost"
-            disabled={busy}
-            onClick={() => setStatus("completed")}
+            disabled={busy || meeting.status === "completed"}
+            onClick={() => patchStatus("completed")}
           >
             Complete
           </Button>
           <Button
             variant="danger"
-            disabled={busy}
-            onClick={() => setStatus("cancelled")}
+            disabled={busy || meeting.status === "cancelled"}
+            onClick={() => patchStatus("cancelled")}
           >
             Cancel
           </Button>
@@ -118,7 +118,7 @@ export default function TmaMeetingDetailPage() {
         <Button
           className="w-full"
           disabled={busy || status === meeting.status}
-          onClick={saveStatus}
+          onClick={() => patchStatus(status)}
         >
           {busy ? "Saving…" : "Save status"}
         </Button>

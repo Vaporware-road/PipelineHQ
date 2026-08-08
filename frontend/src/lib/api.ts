@@ -84,4 +84,34 @@ export async function apiList<T>(path: string): Promise<T[]> {
   return data.results;
 }
 
+export type ListPage<T> = {
+  results: T[];
+  count: number;
+  next: string | null;
+};
+
+/** Turn an absolute DRF `next` URL into a same-origin `/api/...` path. */
+export function normalizeApiPath(pathOrUrl: string): string {
+  if (pathOrUrl.startsWith("/")) return pathOrUrl;
+  try {
+    const u = new URL(pathOrUrl);
+    return `${u.pathname}${u.search}`;
+  } catch {
+    return pathOrUrl;
+  }
+}
+
+/** One page of a DRF list (or a bare array treated as a single complete page). */
+export async function apiListPage<T>(path: string): Promise<ListPage<T>> {
+  const data = await api<Paginated<T> | T[]>(normalizeApiPath(path));
+  if (Array.isArray(data)) {
+    return { results: data, count: data.length, next: null };
+  }
+  return {
+    results: data.results,
+    count: data.count,
+    next: data.next ? normalizeApiPath(data.next) : null,
+  };
+}
+
 export { API_URL };

@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { TmaLoadMore } from "@/components/tma/TmaLoadMore";
 import { Badge, Card, Empty, Money } from "@/components/ui";
-import { apiList } from "@/lib/api";
+import { apiListPage } from "@/lib/api";
 import { useTmaAuth } from "@/lib/tma-auth";
 import { labelFor, OPP_STAGES } from "@/lib/tma-constants";
 import type { Opportunity } from "@/lib/types";
@@ -12,9 +13,15 @@ const OPEN_STAGES = OPP_STAGES.filter(
   (s) => s.value !== "closed_won" && s.value !== "closed_lost",
 );
 
+const OPEN_STAGE_VALUES = OPEN_STAGES.map((s) => s.value).join(",");
+const LIST_PATH = `/api/opportunities/?ordering=-amount&stage=${OPEN_STAGE_VALUES}`;
+
 export default function TmaPipelinePage() {
   const { phase } = useTmaAuth();
   const [opps, setOpps] = useState<Opportunity[] | null>(null);
+  const [count, setCount] = useState(0);
+  const [next, setNext] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -22,8 +29,12 @@ export default function TmaPipelinePage() {
     let cancelled = false;
     (async () => {
       try {
-        const rows = await apiList<Opportunity>("/api/opportunities/?ordering=-amount");
-        if (!cancelled) setOpps(rows);
+        const page = await apiListPage<Opportunity>(LIST_PATH);
+        if (!cancelled) {
+          setOpps(page.results);
+          setCount(page.count);
+          setNext(page.next);
+        }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load pipeline");
       }
@@ -32,6 +43,22 @@ export default function TmaPipelinePage() {
       cancelled = true;
     };
   }, [phase]);
+
+  const loadMore = useCallback(async () => {
+    if (!next || loadingMore) return;
+    setLoadingMore(true);
+    setError("");
+    try {
+      const page = await apiListPage<Opportunity>(next);
+      setOpps((prev) => [...(prev ?? []), ...page.results]);
+      setCount(page.count);
+      setNext(page.next);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load more");
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [next, loadingMore]);
 
   const byStage = useMemo(() => {
     const map = new Map<string, Opportunity[]>();
@@ -45,11 +72,14 @@ export default function TmaPipelinePage() {
     return map;
   }, [opps]);
 
-  if (error) return <p className="text-sm text-[var(--danger)]">{error}</p>;
+  if (error && opps === null) return <p className="text-sm text-[var(--danger)]">{error}</p>;
   if (opps === null) return <Empty>Loading pipeline…</Empty>;
 
   return (
     <div className="space-y-4">
+      <Link href="/tma" className="text-xs text-[var(--cyan)] hover:underline">
+        ← Home
+      </Link>
       <div>
         <h1 className="font-[family-name:var(--font-display)] text-xl tracking-[0.06em]">
           Pipeline
@@ -102,6 +132,15 @@ export default function TmaPipelinePage() {
           </section>
         );
       })}
+
+      <TmaLoadMore
+        shown={opps.length}
+        total={count}
+        next={next}
+        loading={loadingMore}
+        onLoadMore={loadMore}
+      />
+      {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
     </div>
   );
 }
